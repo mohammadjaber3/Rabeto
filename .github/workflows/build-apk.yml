@@ -1,4 +1,5 @@
-name: ساخت APK رابطوon:
+name: ساخت APK رابطو
+on:
   push:
     branches: [ main ]
   workflow_dispatch:permissions:
