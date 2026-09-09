@@ -1,0 +1,48 @@
+plugins {
+id 'com.android.application' version '8.7.3'
+} 
+
+def ksFile = file('rabeto.jks')
+def runNumber = System.getenv("GITHUB_RUN_NUMBER") ?: "1" 
+
+android {
+namespace 'com.rabeto.app'
+compileSdk 35 
+
+defaultConfig {
+applicationId "com.rabeto.app"
+minSdk 24
+targetSdk 34
+versionCode Integer.parseInt(runNumber)
+versionName "1.0." + runNumber
+} 
+
+if (ksFile.exists()) {
+signingConfigs {
+release {
+storeFile ksFile
+storePassword System.getenv("RABETO_STORE_PASS")
+keyAlias System.getenv("RABETO_KEY_ALIAS") ?: "rabeto"
+keyPassword System.getenv("RABETO_KEY_PASS")
+}
+}
+} 
+
+buildTypes {
+release {
+minifyEnabled false
+shrinkResources false
+signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
+}
+} 
+
+compileOptions {
+sourceCompatibility JavaVersion.VERSION_17
+targetCompatibility JavaVersion.VERSION_17
+}
+} 
+
+dependencies {
+implementation 'com.google.android.gms:play-services-nearby:19.5.0'
+implementation 'androidx.core:core:1.13.1'
+}
