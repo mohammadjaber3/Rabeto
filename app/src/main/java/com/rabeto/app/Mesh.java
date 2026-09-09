@@ -42,7 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتوث سعی می‌کند•اگر بلوتوث کار نکند، وای‌فای مستقیم استفاده می‌کند (اگر پشتیبانی شود)•هرچه سرعت بیشتر باشد (کمتر latency)، ترجیح داده می‌شود•پیام‌ها علاوه بر direct connection، می‌توانند از طریق واسطه‌های دیگر منتقل شوند (flood)•هر پیام شناسه مختصی دارد تا دوباره فرستاده نشود•پیام‌های رمزشدهٔ شخصی را تنها مقصد می‌تواند باز کند•برای هر فرد کلید عمومی ذخیره می‌شود و اولین بار (TOFU) تایید می‌شود */
+import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتو... */
 public class Mesh {
   private static final String TAG = "RabetoMesh";
   private static final String SERVICE_ID = "com.rabeto.mesh.v1";
@@ -63,11 +63,13 @@ public class Mesh {
   private final Map<String, String> quality = new HashMap<String, String>();          // endpoint -> bt|wifi
   private final Map<String, String> pubKeys = new HashMap<String, String>();          // userId -> publicKey
   private final Map<String, String> names = new HashMap<String, String>();            // userId -> name
+  private final Map<String, String> avatars = new HashMap<String, String>();          // userId -> عکس (base64)
   private final LinkedHashSet<String> seen = new LinkedHashSet<String>();
   private final LinkedList<JSONObject> cache = new LinkedList<JSONObject>();
 
   private String myId;
   private String myName;
+  private String myAvatar;
   private boolean running = false;
   private boolean fastMode;   // true => P2P_STAR (وای‌فای دایرکت، اتصال ستاره‌ای)
 
@@ -89,6 +91,7 @@ public class Mesh {
           }
       }
       myName = prefs.getString("myName", "کاربر " + myId.substring(0, 3));
+      myAvatar = prefs.getString("myAvatar", "");
       loadState();
   }
 
@@ -259,6 +262,7 @@ public class Mesh {
           o.put("t", "hello");
           o.put("id", myId);
           o.put("name", myName);
+          o.put("av", myAvatar);
           o.put("pk", ident.pubKey());
           client.sendPayload(endpointId, Payload.fromBytes(o.toString().getBytes(StandardCharsets.UTF_8)));
       } catch (Throwable ignored) {}
@@ -270,6 +274,8 @@ public class Mesh {
       String pk = o.optString("pk", "");
       if (uid.length() == 0) return;
       names.put(uid, nm);
+      String av = o.optString("av", "");
+      if (av.length() > 0) avatars.put(uid, av);
       learnKey(uid, pk);
       String[] tag = new String[]{uid, nm};
       found.put(endpointId, tag);
@@ -462,10 +468,13 @@ public class Mesh {
           for (Map.Entry<String, String> en : pubKeys.entrySet()) keys.put(en.getKey(), en.getValue());
           JSONObject nms = new JSONObject();
           for (Map.Entry<String, String> en : names.entrySet()) nms.put(en.getKey(), en.getValue());
+          JSONObject avs = new JSONObject();
+          for (Map.Entry<String, String> en : avatars.entrySet()) avs.put(en.getKey(), en.getValue());
           prefs.edit()
                   .putString("cache", arr.toString())
                   .putString("keys", keys.toString())
                   .putString("names", nms.toString())
+                  .putString("avatars", avs.toString())
                   .apply();
       } catch (Throwable ignored) {}
   }
@@ -488,6 +497,11 @@ public class Mesh {
           JSONObject nms = new JSONObject(prefs.getString("names", "{}"));
           Iterator<String> it = nms.keys();
           while (it.hasNext()) { String k = it.next(); names.put(k, nms.optString(k)); }
+      } catch (Throwable ignored) {}
+      try {
+          JSONObject avs = new JSONObject(prefs.getString("avatars", "{}"));
+          Iterator<String> it = avs.keys();
+          while (it.hasNext()) { String k = it.next(); avatars.put(k, avs.optString(k)); }
       } catch (Throwable ignored) {}
   }
 
@@ -515,7 +529,45 @@ public class Mesh {
           o.put("running", running);
           o.put("fastMode", fastMode);
           o.put("crypto", ident.ok());
-          o.put("peers", peers.size());
+
+          JSONObject me = new JSONObject();
+          me.put("id", myId);
+          me.put("name", myName);
+          me.put("code", ident.ok() ? ident.code() : "--------");
+          me.put("av", myAvatar);
+          o.put("me", me);
+
+          boolean anyWifi = false;
+          JSONArray arr = new JSONArray();
+          for (Map.Entry<String, String[]> e : peers.entrySet()) {
+              JSONObject p = new JSONObject();
+              String uid = e.getValue()[0];
+              p.put("id", uid);
+              p.put("name", e.getValue()[1]);
+              String q = quality.get(e.getKey());
+              p.put("link", q == null ? "bt" : q);
+              if ("wifi".equals(q)) anyWifi = true;
+              String pk = pubKeys.get(uid);
+              p.put("code", pk == null ? "" : Ident.codeFor(pk));
+              p.put("hasKey", pk != null);
+              arr.put(p);
+          }
+          o.put("peers", arr);
+          o.put("link", anyWifi ? "wifi" : "bt");
+
+          JSONObject known = new JSONObject();
+          for (Map.Entry<String, String> en : names.entrySet()) {
+              if (en.getKey().equals(myId)) continue;
+              JSONObject k = new JSONObject();
+              k.put("name", en.getValue());
+              String pk = pubKeys.get(en.getKey());
+              k.put("code", pk == null ? "" : Ident.codeFor(pk));
+              k.put("hasKey", pk != null);
+              String av = avatars.get(en.getKey());
+              if (av != null) k.put("av", av);
+              known.put(en.getKey(), k);
+          }
+          o.put("known", known);
           emit(o);
       } catch (Throwable ignored) {}
   }
@@ -582,6 +634,16 @@ public class Mesh {
       if (running) {
           try { client.stopAdvertising(); } catch (Throwable ignored) {}
           advertise();
+          for (String ep : new ArrayList<String>(peers.keySet())) sendHello(ep);
+      }
+      emitStatus();
+  }
+
+  @JavascriptInterface
+  public void setAvatar(String base64) {
+      myAvatar = base64 == null ? "" : base64;
+      prefs.edit().putString("myAvatar", myAvatar).apply();
+      if (running) {
           for (String ep : new ArrayList<String>(peers.keySet())) sendHello(ep);
       }
       emitStatus();
@@ -674,49 +736,5 @@ public class Mesh {
               }
           }
       });
-  }
-
-  private void emitPeersStatus() {
-      try {
-          JSONObject o = new JSONObject();
-          o.put("type", "status");
-
-          JSONObject me = new JSONObject();
-          me.put("id", myId);
-          me.put("name", myName);
-          me.put("code", ident.ok() ? ident.code() : "--------");
-          o.put("me", me);
-
-          boolean anyWifi = false;
-          JSONArray arr = new JSONArray();
-          for (Map.Entry<String, String[]> e : peers.entrySet()) {
-              JSONObject p = new JSONObject();
-              String uid = e.getValue()[0];
-              p.put("id", uid);
-              p.put("name", e.getValue()[1]);
-              String q = quality.get(e.getKey());
-              p.put("link", q == null ? "bt" : q);
-              if ("wifi".equals(q)) anyWifi = true;
-              String pk = pubKeys.get(uid);
-              p.put("code", pk == null ? "" : Ident.codeFor(pk));
-              p.put("hasKey", pk != null);
-              arr.put(p);
-          }
-          o.put("peers", arr);
-          o.put("link", anyWifi ? "wifi" : "bt");
-
-          JSONObject known = new JSONObject();
-          for (Map.Entry<String, String> en : names.entrySet()) {
-              if (en.getKey().equals(myId)) continue;
-              JSONObject k = new JSONObject();
-              k.put("name", en.getValue());
-              String pk = pubKeys.get(en.getKey());
-              k.put("code", pk == null ? "" : Ident.codeFor(pk));
-              k.put("hasKey", pk != null);
-              known.put(en.getKey(), k);
-          }
-          o.put("known", known);
-          emit(o);
-      } catch (Throwable ignored) {}
   }
 }
