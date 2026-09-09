@@ -1,66 +1,73 @@
 name: ساخت APK رابطو
+
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:permissions:
-  contents: writejobs:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - name: گرفتن کدها
-        uses: actions/checkout@v4  - name: نصب جاوا ۱۷
-    uses: actions/setup-java@v4
-    with:
-      distribution: temurin
-      java-version: '17'
+        uses: actions/checkout@v4
 
-  - name: نصب Android SDK
-    uses: android-actions/setup-android@v3
+      - name: نصب جاوا ۱۷
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
-  - name: نصب ابزارهای لازم SDK
-    run: |
-      yes | sdkmanager --licenses > /dev/null || true
-      sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+      - name: نصب Android SDK
+        uses: android-actions/setup-android@v3
 
-  - name: آماده‌سازی Gradle
-    uses: gradle/actions/setup-gradle@v4
-    with:
-      gradle-version: '8.11.1'
+      - name: نصب ابزارهای لازم SDK
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platforms;android-35" "build-tools;35.0.0" "platform-tools"
 
-  - name: بازسازی کلید امضا
-    env:
-      KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
-    run: |
-      if [ -n "$KEYSTORE_B64" ]; then
-        echo "$KEYSTORE_B64" | base64 -d > app/rabeto.jks
-        echo "کلید پیدا شد"
-      else
-        echo "بدون کلید دائمی"
-      fi
+      - name: آماده‌سازی Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
-  - name: ساخت APK
-    env:
-      RABETO_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
-      RABETO_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-      RABETO_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
-    run: gradle assembleRelease --no-daemon --stacktrace
+      - name: بازسازی کلید امضا
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > app/rabeto.jks
+            echo "کلید امضای دائمی پیدا شد."
+          else
+            echo "کلید امضا تنظیم نشده — با کلید debug امضا می‌شود."
+          fi
 
-  - name: تغییر نام فایل
-    run: |
-      mkdir -p out
-      cp app/build/outputs/apk/release/*.apk "out/Rabeto-v${{ github.run_number }}.apk"
-      ls -lh out
+      - name: ساخت APK
+        env:
+          RABETO_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          RABETO_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          RABETO_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
+        run: gradle assembleRelease --no-daemon --stacktrace
 
-  - name: بارگذاری فایل APK
-    uses: actions/upload-artifact@v4
-    with:
-      name: Rabeto-APK
-      path: out/*.apk
+      - name: تغییر نام فایل
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk "out/Rabeto-v${{ github.run_number }}.apk"
+          ls -lh out
 
-  - name: انتشار در Releases
-    uses: softprops/action-gh-release@v2
-    with:
-      tag_name: v${{ github.run_number }}
-      name: Rabeto v${{ github.run_number }}
-      body: نسخهٔ جدید
-      files: out/*.apk
+      - name: بارگذاری فایل APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Rabeto-APK
+          path: out/*.apk
+
+      - name: انتشار در بخش Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: Rabeto v${{ github.run_number }}
+          body: نسخهٔ ساخته‌شدهٔ خودکار — فایل APK را از پایین دانلود کنید.
+          files: out/*.apk
