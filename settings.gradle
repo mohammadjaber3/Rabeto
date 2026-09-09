@@ -4,10 +4,14 @@ pluginManagement {
         mavenCentral()
         gradlePluginPortal()
     }
-}dependencyResolutionManagement {
+}
+
+dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
     }
-}rootProject.name = "Rabeto"
+}
+
+rootProject.name = "Rabeto"
 include ':app'
