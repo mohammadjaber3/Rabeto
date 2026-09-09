@@ -42,7 +42,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتوث، سپس وای‌فای دایرکت.•*/
+import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتوث سعی می‌کند•اگر بلوتوث کار نکند، وای‌فای مستقیم استفاده می‌کند (اگر پشتیبانی شود)•هرچه سرعت بیشتر باشد (کمتر latency)، ترجیح داده می‌شود•پیام‌ها علاوه بر direct connection، می‌توانند از طریق واسطه‌های دیگر منتقل شوند (flood)•هر پیام شناسه مختصی دارد تا دوباره فرستاده نشود•پیام‌های رمزشدهٔ شخصی را تنها مقصد می‌تواند باز کند•برای هر فرد کلید عمومی ذخیره می‌شود و اولین بار (TOFU) تایید می‌شود */
 public class Mesh {
   private static final String TAG = "RabetoMesh";
   private static final String SERVICE_ID = "com.rabeto.mesh.v1";
@@ -168,6 +168,11 @@ public class Mesh {
               }
           }, 12000);
       }
+
+      @Override
+      public void onEndpointLost(String endpointId) {
+          found.remove(endpointId);
+      }
   };
 
   private void connectTo(String endpointId) {
@@ -190,11 +195,6 @@ public class Mesh {
       public void onConnectionInitiated(String endpointId, ConnectionInfo info) {
           found.put(endpointId, parseTag(info.getEndpointName()));
           client.acceptConnection(endpointId, payloads);
-      }
-
-      @Override
-      public void onEndpointLost(String endpointId) {
-          found.remove(endpointId);
       }
 
       @Override
@@ -229,10 +229,6 @@ public class Mesh {
           }
           emitStatus();
       }
-
-      @Override
-      public void onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
-      }
   };
 
   // ---------------------------------------------------------------- payloads
@@ -249,6 +245,11 @@ public class Mesh {
           } catch (Throwable e) {
               Log.w(TAG, "bad payload");
           }
+      }
+
+      @Override
+      public void onPayloadTransferUpdate(String endpointId, PayloadTransferUpdate update) {
+          // Handle payload transfer updates if needed
       }
   };
 
