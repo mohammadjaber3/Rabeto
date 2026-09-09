@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>رابطو</title>
+<style>
+:root{
+  --bg:#0c0f13; --surface:#12161d; --surface-2:#1a1f28; --surface-3:#222834;
+  --line:#ffffff14; --text:#edf1f5; --muted:#8a94a1; --muted-2:#5d6773;
+  --accent:#d9924e; --accent-hi:#eaa869; --mine:#22323b; --other:#1b202a;
+  --ok:#4fb37a; --warn:#e5a23d; --danger:#e5484d;
+}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;overflow:hidden}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Tahoma,"Noto Naskh Arabic",sans-serif;
+  background:var(--bg);color:var(--text);font-size:15px;line-height:1.6}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+input,textarea{font-family:inherit;color:inherit}
+#app{display:flex;flex-direction:column;height:100dvh}header{display:flex;align-items:center;gap:9px;padding:11px 13px;background:var(--surface);border-bottom:1px solid var(--line)}
+header .back{display:none;font-size:24px;color:var(--muted);padding:0 3px}
+header .ttl{flex:1;min-width:0}
+header .ttl b{display:block;font-size:16.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header .ttl span{font-size:11.5px;color:var(--muted)}
+.pill{display:flex;align-items:center;gap:5px;font-size:11.5px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:999px;padding:5px 9px;color:var(--muted);white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--danger);flex-shrink:0}
+.dot.on{background:var(--ok);box-shadow:0 0 7px var(--ok)}
+.dot.scan{background:var(--warn);animation:pulse 1.4s infinite}
+@keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+.ib{width:37px;height:37px;border-radius:50%;background:var(--surface-3);display:grid;place-items:center;flex-shrink:0}#warn{display:none;background:#3a2a12;border-bottom:1px solid #ffffff1a;padding:10px 13px;font-size:13px}
+#warn b{color:var(--accent-hi)}
+#warn .acts{display:flex;gap:8px;margin-top:8px}
+#warn .acts button{background:var(--accent);color:#241708;border-radius:9px;padding:6px 13px;font-size:12.5px;font-weight:700}.screen{flex:1;overflow-y:auto;display:none}
+.screen.show{display:block}
+.row{display:flex;gap:11px;align-items:center;padding:11px 13px;border-bottom:1px solid var(--line)}
+.row:active{background:var(--surface-2)}
+.av{width:45px;height:45px;border-radius:50%;display:grid;place-items:center;font-weight:700;
+  font-size:17px;background:var(--surface-3);color:var(--accent-hi);flex-shrink:0}
+.row .info{flex:1;min-width:0}
+.row .nm{font-weight:600;display:flex;align-items:center;gap:5px;font-size:14.5px}
+.row .ls{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .side{text-align:left;font-size:10.5px;color:var(--muted-2);display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.badge{background:var(--accent);color:#241708;border-radius:999px;font-size:11px;font-weight:700;padding:0 7px}
+.tick{font-size:11px;color:var(--ok)}
+.vfy{font-size:10.5px;padding:1px 6px;border-radius:6px;background:#ffffff12;color:var(--muted)}
+.vfy.ok{background:#1e3a2a;color:#7ddba5}
+.vfy.bad{background:#3d1c1e;color:#ff9b9e}
+.hint{padding:20px 18px;text-align:center;color:var(--muted-2);font-size:13px;line-height:2}#msgs{flex:1;overflow-y:auto;padding:13px 11px;display:flex;flex-direction:column;gap:7px}
+.b{max-width:83%;padding:7px 10px 5px;border-radius:14px;background:var(--other);align-self:flex-start;
+  border:1px solid var(--line);word-wrap:break-word}
+.b.mine{align-self:flex-end;background:var(--mine)}
+.b.alert{border-color:#7a2b2f;background:#2a1618}
+.b .who{font-size:12px;font-weight:700;color:var(--accent-hi);margin-bottom:1px}
+.b .tx{white-space:pre-wrap;word-break:break-word}
+.b img{max-width:100%;border-radius:10px;display:block;margin:2px 0}
+.b .mt{display:flex;gap:5px;align-items:center;font-size:10.5px;color:var(--muted-2);margin-top:2px}
+.hop{background:#ffffff10;border-radius:5px;padding:0 5px}
+.sys{align-self:center;font-size:11.5px;color:var(--muted-2);background:var(--surface-2);border-radius:999px;padding:3px 12px;text-align:center;max-width:90%}#composer{display:flex;gap:7px;align-items:flex-end;padding:8px 9px;background:var(--surface);border-top:1px solid var(--line)}
+#txt{flex:1;min-height:41px;max-height:118px;resize:none;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:21px;padding:9px 14px;outline:none;font-size:15px}
+#txt:focus{border-color:var(--accent)}
+#send{width:43px;height:43px;border-radius:50%;background:var(--accent);color:#241708;font-size:19px;display:grid;place-items:center;flex-shrink:0}
+#send:active{transform:scale(.93)}.modal{position:fixed;inset:0;background:#000000cc;display:none;align-items:center;justify-content:center;padding:20px;z-index:50}
+.modal.show{display:flex}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:19px;padding:20px;width:100%;max-width:380px;max-height:88vh;overflow-y:auto}
+.card h3{font-size:17.5px;margin-bottom:5px}
+.card p{font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.85}
+.card input{width:100%;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;padding:11px 13px;outline:none;margin-bottom:11px}
+.card input:focus{border-color:var(--accent)}
+.btn{width:100%;background:var(--accent);color:#241708;font-weight:700;border-radius:11px;padding:11px;margin-bottom:8px}
+.btn.ghost{background:var(--surface-3);color:var(--text);font-weight:600}
+.btn.bad{background:#3d1c1e;color:#ff9b9e}
+.code{font-family:monospace;font-size:26px;letter-spacing:3px;text-align:center;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:12px;padding:13px;margin-bottom:12px;color:var(--accent-hi)}
+.sw{display:flex;align-items:center;justify-content:space-between;gap:10px;background:var(--surface-2);
+  border:1px solid var(--line);border-radius:11px;padding:10px 13px;margin-bottom:8px;font-size:13.5px}
+.sw i{width:44px;height:25px;border-radius:999px;background:var(--surface-3);position:relative;flex-shrink:0;transition:.2s}
+.sw i::after{content:'';position:absolute;top:3px;right:3px;width:19px;height:19px;border-radius:50%;background:#fff;transition:.2s}
+.sw.on i{background:var(--ok)}
+.sw.on i::after{right:22px}
+#toast{position:fixed;bottom:80px;right:50%;transform:translateX(50%);background:#000000e0;border:1px solid var(--line);
+  color:#fff;padding:9px 15px;border-radius:999px;font-size:12.5px;opacity:0;transition:.25s;pointer-events:none;z-index:60;max-width:88vw;text-align:center}
+#toast.show{opacity:1;bottom:96px}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="back" id="back">›</button>
+    <div class="ttl"><b id="hTitle">رابطو</b><span id="hSub">شبکهٔ بدون اینترنت</span></div>
+    <div class="pill"><span class="dot scan" id="statusDot"></span><span id="statusTx">جست‌وجو…</span></div>
+    <button class="ib" id="menuBtn">⋮</button>
+  </header>
+  <div id="warn"></div>
+  <div class="screen show" id="scList">
+    <div id="chatlist"></div>
+    <div class="hint" id="listHint"></div>
+  </div>
+  <div class="screen" id="scChat" style="flex-direction:column">
+    <div id="msgs"></div>
+  </div>
+  <div id="composer" style="display:none">
+    <button class="ib" id="imgBtn">🖼</button>
+    <textarea id="txt" rows="1" placeholder="پیام…"></textarea>
+    <button id="send">➤</button>
+    <input type="file" id="file" accept="image/*" style="display:none">
+  </div>
+</div>
+<div class="modal" id="nameModal"><div class="card">
+  <h3>نام شما</h3>
+  <p>این نام برای گوشی‌های نزدیک دیده می‌شود. نام واقعی لازم نیست.</p>
+  <input id="nameInput" placeholder="مثلاً: مرتضی">
+  <button class="btn" id="nameSave">ذخیره</button>
+</div></div>
+<div class="modal" id="menuModal"><div class="card">
+  <h3>تنظیمات</h3>
+  <p id="meLine"></p>
+  <div class="code" id="myCode">-- -- -- --</div>
+  <p>این «کد تأیید» شماست. برای اینکه دیگران مطمئن شوند پیام‌ها واقعاً از شماست،
+     این ۸ رقم را رو در رو یا با تماس تلفنی به آن‌ها بگویید.</p>
+  <button class="btn" id="mShare">فرستادن اپ به گوشی بغلی</button>
+  <button class="btn ghost" id="mChangeName">تغییر نام</button>
+  <div class="sw" id="mFast"><span>حالت پرسرعت (وای‌فای دایرکت)</span><i></i></div>
+  <p style="font-size:12px;margin-bottom:12px">حالت پرسرعت برای فرستادن عکس و فایل بهتر است،
+     ولی <b>همهٔ گوشی‌ها باید آن را روشن کنند</b> و شبکه دیگر همه‌به‌همه نیست. اگر کسی را پیدا نکردی خاموشش کن.</p>
+  <button class="btn ghost" id="mRestart">راه‌اندازی دوبارهٔ شبکه</button>
+  <button class="btn ghost" id="mClear">پاک کردن همهٔ پیام‌ها</button>
+  <button class="btn ghost" id="mClose">بستن</button>
+</div></div>
+<div class="modal" id="peerModal"><div class="card">
+  <h3 id="pTitle">مخاطب</h3>
+  <p id="pInfo"></p>
+  <div class="code" id="pCode">-- -- -- --</div>
+  <p>اگر این ۸ رقم با آنچه خودِ او می‌گوید یکی است، این شخص همان کسی است که فکر می‌کنید.
+     یک بار تأیید کنید و برای همیشه ذخیره می‌شود.</p>
+  <button class="btn" id="pVerify">این کد درست است — تأیید می‌کنم</button>
+  <button class="btn ghost" id="pOpen">باز کردن گفتگو</button>
+  <button class="btn ghost" id="pClose">بستن</button>
+</div></div>
+<div id="toast"></div>
+<script>
+'use strict';
+
+/* ---------------- پل با بخش اندروید ---------------- */
+var N = window.RabetoNative || {
+  send:function(){ return 'demo'+Date.now(); }, setName:function(){},
+  state:function(){ return '{"id":"browser","name":"مرورگر","code":"0000 0000","peers":0}'; },
+  refresh:function(){}, restart:function(){}, setFastMode:function(){},
+  openBluetooth:function(){}, openWifi:function(){}, shareApp:function(){}
+};
+var IS_NATIVE = !!window.RabetoNative;
+
+var LS = {
+  get:function(k,d){ try{ var v=localStorage.getItem('rb.'+k); return v==null?d:JSON.parse(v); }catch(e){ return d; } },
+  set:function(k,v){ try{ localStorage.setItem('rb.'+k, JSON.stringify(v)); }catch(e){} }
+};
+var me = { id:'?', name:LS.get('name',''), code:'--------' };
+var peers = [];                       // متصل در این لحظه
+var known = {};                       // id -> {name, code, hasKey}  (از اندروید)
+var trusted = LS.get('trusted', {});  // id -> کدی که کاربر دستی تأیید کرده
+var msgs = LS.get('msgs', {});
+var unread = LS.get('unread', {});
+var link = 'bt', fastMode = false, open = null, peerModalId = null;
+
+var $ = function(id){ return document.getElementById(id); };
+var esc = function(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){
+  return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+var tstr = function(t){ var d=new Date(t),h=d.getHours(),m=d.getMinutes();
+  return (h<10?'0':'')+h+':'+(m<10?'0':'')+m; };
+var initial = function(s){ s=(s||'?').trim(); return s?s[0]:'?'; };
+function toast(t){ var e=$('toast'); e.textContent=t; e.classList.add('show');
+  clearTimeout(toast._t); toast._t=setTimeout(function(){ e.classList.remove('show'); },2800); }
+function save(){ LS.set('msgs',msgs); LS.set('unread',unread); LS.set('trusted',trusted); }
+function nameOf(id){ return (known[id] && known[id].name) || id; }
+function isOnline(id){ for (var i=0;i<peers.length;i++) if (peers[i].id===id) return true; return false; }
+function trustState(id){
+  var k = known[id]; if (!k || !k.hasKey) return 'none';
+  if (trusted[id] && trusted[id] === k.code) return 'ok';
+  if (trusted[id] && trusted[id] !== k.code) return 'bad';
+  return 'new';
+}
+
+/* ---------------- رخدادها از اندروید ---------------- */
+window.rabetoOn = function(ev){
+  if (!ev) return;
+
+  if (ev.type === 'status'){
+    me.id = ev.me.id; me.code = ev.me.code;
+    if (!me.name){ me.name = ev.me.name; LS.set('name', me.name); }
+    peers = ev.peers || []; known = ev.known || {}; link = ev.link || 'bt';
+    fastMode = !!ev.fastMode;
+    renderStatus(); renderList(); if (open) renderHead();
+    return;
+  }
+
+  if (ev.type === 'radio'){
+    var w = $('warn'), bad = [];
+    if (!ev.bt) bad.push('بلوتوث');
+    if (!ev.wifi) bad.push('وای‌فای');
+    if (!bad.length){ w.style.display='none'; return; }
+    w.style.display='block';
+    w.innerHTML = '<b>'+bad.join(' و ')+' خاموش است.</b> رابطو برای پیدا کردن گوشی‌های نزدیک '+
+      'به هر دو نیاز دارد (اینترنت لازم نیست، فقط خودِ رادیو روشن باشد).'+
+      '<div class="acts">'+(!ev.bt?'<button id="wBt">روشن کردن بلوتوث</button>':'')+
+      (!ev.wifi?'<button id="wWf">روشن کردن وای‌فای</button>':'')+'</div>';
+    if ($('wBt')) $('wBt').onclick = function(){ N.openBluetooth(); };
+    if ($('wWf')) $('wWf').onclick = function(){ N.openWifi(); };
+    return;
+  }
+
+  if (ev.type === 'error'){
+    if (ev.code === 'permissions-denied') toast('بدون اجازهٔ بلوتوث و وای‌فای، اپ نمی‌تواند کار کند');
+    if (ev.code === 'share-failed') toast('فرستادن فایل اپ ممکن نشد');
+    return;
+  }
+
+  if (ev.type === 'message'){
+    var env = ev.env;
+
+    /* رسید: پیام من به مقصد رسید */
+    if (env.kind === 'ack'){
+      var oid = env.text, done = false;
+      for (var k in msgs){ for (var i=msgs[k].length-1;i>=0;i--){
+        if (msgs[k][i].id === oid){ msgs[k][i].got = true; done = true; break; } } if (done) break; }
+      if (done){ save(); if (open) renderMsgs(); }
+      return;
+    }
+
+    var key = (env.to === '*') ? '*' : env.from;
+    push(key, env);
+    if (open !== key){ unread[key] = (unread[key]||0)+1; buzz(); }
+    save(); renderList();
+    if (open === key) renderMsgs();
+    return;
+  }
+};
+
+function push(key, env){
+  var arr = msgs[key] || (msgs[key]=[]);
+  for (var i=arr.length-1;i>=0 && i>arr.length-40;i--) if (arr[i].id===env.id) return;
+  arr.push(env);
+  if (arr.length > 400) arr.splice(0, arr.length-400);
+}
+function buzz(){
+  try{ if (navigator.vibrate) navigator.vibrate(90); }catch(e){}
+  try{
+    var C = window.AudioContext||window.webkitAudioContext; if(!C) return;
+    buzz.c = buzz.c || new C();
+    var o=buzz.c.createOscillator(), g=buzz.c.createGain();
+    o.frequency.value=880; g.gain.value=.06; o.connect(g); g.connect(buzz.c.destination);
+    o.start(); setTimeout(function(){ try{o.stop();}catch(e){} },130);
+  }catch(e){}
+}
+
+/* ---------------- وضعیت ---------------- */
+function renderStatus(){
+  var n = peers.length;
+  $('statusDot').className = 'dot ' + (n>0?'on':'scan');
+  $('statusTx').textContent = n>0 ? (n+' دستگاه · '+(link==='wifi'?'وای‌فای':'بلوتوث')) : 'جست‌وجو…';
+  $('meLine').textContent = 'نام: '+me.name+'  •  شناسه: '+me.id+'  •  متصل: '+n;
+  $('myCode').textContent = me.code;
+  $('mFast').className = 'sw' + (fastMode?' on':'');
+}
+
+/* ---------------- لیست گفتگوها ---------------- */
+function renderList(){
+  var keys = ['*'], ids = Object.keys(known);
+  ids.sort(function(a,b){ return (isOnline(b)?1:0)-(isOnline(a)?1:0); });
+  for (var i=0;i<ids.length;i++) if (ids[i]!==me.id) keys.push(ids[i]);
+  for (var k2 in msgs) if (k2!=='*' && keys.indexOf(k2)<0) keys.push(k2);
+
+  var html='';
+  for (var j=0;j<keys.length;j++){
+    var k = keys[j], all = (k==='*'), arr = msgs[k]||[], last = arr[arr.length-1];
+    var nm = all ? 'گفتگوی همگانی' : nameOf(k);
+    var ts = trustState(k), v = '';
+    if (!all && ts==='ok')  v = '<span class="vfy ok">تأییدشده</span>';
+    if (!all && ts==='new') v = '<span class="vfy">تأیید نشده</span>';
+    if (!all && ts==='bad') v = '<span class="vfy bad">کد عوض شد!</span>';
+    var lastTx = last
+      ? ((last.from===me.id?'شما: ':(all?(last.name||'')+': ':'')) +
+         (last.kind==='image'?'🖼 تصویر':(last.text||'')))
+      : (all?'همهٔ کسانی که نزدیک‌اند':'گفتگوی خصوصی و رمزشده');
+    var u = unread[k]||0;
+    html += '<div class="row" data-k="'+esc(k)+'">'+
+      '<div class="av">'+(all?'⌘':esc(initial(nm)))+'</div>'+
+      '<div class="info"><div class="nm">'+esc(nm)+
+        (!all&&isOnline(k)?' <span class="dot on" style="width:7px;height:7px"></span>':'')+v+'</div>'+
+        '<div class="ls">'+esc(lastTx)+'</div></div>'+
+      '<div class="side">'+(last?tstr(last.ts):'')+(u?'<span class="badge">'+u+'</span>':'')+'</div></div>';
+  }
+  $('chatlist').innerHTML = html;
+  var rows = document.querySelectorAll('#chatlist .row');
+  for (var r=0;r<rows.length;r++){
+    (function(el){
+      var k = el.getAttribute('data-k');
+      var timer = null;
+      el.onclick = function(){ openChat(k); };
+      if (k !== '*') el.oncontextmenu = function(e){ e.preventDefault(); showPeer(k); };
+    })(rows[r]);
+  }
+  $('listHint').innerHTML = peers.length ? 'برای دیدن کد تأیید یک نفر، انگشت را روی نامش نگه دارید.' :
+    'هیچ گوشیِ نزدیکی پیدا نشد.<br>بلوتوث و وای‌فای هر دو گوشی روشن باشد و رابطو روی هر دو باز باشد.<br>'+
+    'پیام‌هایتان ذخیره می‌شوند و به‌محض پیدا شدن یک دستگاه فرستاده می‌شوند.';
+}
+
+/* ---------------- گفتگو ---------------- */
+function renderHead(){
+  var all = (open==='*');
+  $('hTitle').textContent = all ? 'گفتگوی همگانی' : nameOf(open);
+  if (all){ $('hSub').textContent = 'همهٔ دستگاه‌های شبکه · بدون رمز'; return; }
+  var ts = trustState(open);
+  $('hSub').textContent = (isOnline(open)?'متصل':'آفلاین — پیام در نوبت می‌ماند') +
+    ' · رمزشده' + (ts==='ok'?' · تأییدشده':(ts==='bad'?' · کد عوض شد!':' · تأیید نشده'));
+}
+function openChat(k){
+  open = k; unread[k]=0; save();
+  $('scList').classList.remove('show');
+  $('scChat').classList.add('show'); $('scChat').style.display='flex';
+  $('composer').style.display='flex'; $('back').style.display='block';
+  renderHead(); renderMsgs(); renderList();
+}
+function backToList(){
+  open = null;
+  $('scChat').classList.remove('show'); $('scChat').style.display='none';
+  $('composer').style.display='none'; $('back').style.display='none';
+  $('scList').classList.add('show');
+  $('hTitle').textContent='رابطو'; $('hSub').textContent='شبکهٔ بدون اینترنت';
+  renderList();
+}
+function renderMsgs(){
+  var arr = msgs[open]||[], html='';
+  if (open !== '*'){
+    var ts = trustState(open);
+    if (ts==='new') html += '<div class="sys">این گفتگو رمزشده است، ولی هویت طرف را تأیید نکرده‌اید. '+
+        'کد ۸ رقمی را از خودش بپرسید (انگشت را روی نامش در لیست نگه دارید).</div>';
+    if (ts==='bad') html += '<div class="sys" style="background:#3d1c1e;color:#ff9b9e">هشدار: کد تأیید این شخص عوض شده! '+
+        'ممکن است اپ را دوباره نصب کرده باشد، یا کسی جای او را گرفته باشد. حتماً شفاهی بپرسید.</div>';
+  }
+  if (!arr.length) html += '<div class="sys">هنوز پیامی نیست</div>';
+  for (var i=0;i<arr.length;i++){
+    var m = arr[i], mine = (m.from===me.id);
+    var alert = (!mine && (m.fake || m.keyChanged || m.verified===false));
+    html += '<div class="b'+(mine?' mine':'')+(alert?' alert':'')+'">';
+    if (!mine && open==='*') html += '<div class="who">'+esc(m.name||m.from)+'</div>';
+    if (m.kind==='image' && m.data) html += '<img src="'+esc(m.data)+'">';
+    if (m.opened === false) html += '<div class="tx">🔒 این پیام برای شما باز نشد</div>';
+    else if (m.text) html += '<div class="tx">'+esc(m.text)+'</div>';
+    html += '<div class="mt">'+tstr(m.ts);
+    if (m.hops>0) html += '<span class="hop">'+m.hops+' واسطه</span>';
+    if (m.enc==1) html += '<span>🔒</span>';
+    if (mine && open!=='*') html += '<span class="tick">'+(m.got?'✓✓':'✓')+'</span>';
+    if (alert) html += '<span style="color:#ff9b9e">⚠ تأیید نشد</span>';
+    html += '</div></div>';
+  }
+  var box=$('msgs'); box.innerHTML=html; box.scrollTop=box.scrollHeight;
+}
+
+/* ---------------- فرستادن ---------------- */
+function sendNow(kind, text, data){
+  if (!open) return;
+  if (open!=='*' && !(known[open] && known[open].hasKey)){
+    toast('کلید این شخص را نداریم — تا یک بار در شبکه دیده نشود نمی‌توان رمزگذاری کرد');
+    return;
+  }
+  var p = { to:open, kind:kind, text:text||'' };
+  if (data) p.data = data;
+  var id = N.send(JSON.stringify(p));
+  var env = { id:id||('l'+Date.now()), from:me.id, name:me.name, to:open, kind:kind,
+              text:text||'', ts:Date.now(), hops:0, enc:(open==='*'?0:1), verified:true };
+  if (data) env.data = data;
+  push(open, env); save(); renderMsgs(); renderList();
+  if (!peers.length) toast('در نوبت ماند — به‌محض پیدا شدن یک دستگاه فرستاده می‌شود');
+}
+$('send').onclick = function(){
+  var t = $('txt').value.trim(); if (!t) return;
+  $('txt').value=''; $('txt').style.height='auto'; sendNow('text', t);
+};
+$('txt').addEventListener('input', function(){
+  this.style.height='auto'; this.style.height=Math.min(this.scrollHeight,118)+'px';
+});
+$('imgBtn').onclick = function(){ $('file').click(); };
+$('file').onchange = function(){
+  var f = this.files && this.files[0]; if (!f) return;
+  this.value='';
+  var img = new Image(), url = URL.createObjectURL(f);
+  img.onload = function(){
+    var max=900, w=img.width, h=img.height;
+    if (Math.max(w,h)>max){ var r=max/Math.max(w,h); w=Math.round(w*r); h=Math.round(h*r); }
+    var c=document.createElement('canvas'); c.width=w; c.height=h;
+    c.getContext('2d').drawImage(img,0,0,w,h);
+    var q=0.6, out=c.toDataURL('image/jpeg',q);
+    while (out.length>300000 && q>0.15){ q-=0.1; out=c.toDataURL('image/jpeg',q); }
+    URL.revokeObjectURL(url);
+    if (out.length>360000){ toast('این عکس زیادی سنگین است'); return; }
+    sendNow('image','',out);
+  };
+  img.onerror = function(){ toast('عکس خوانده نشد'); };
+  img.src = url;
+};
+
+/* ---------------- مخاطب و تأیید ---------------- */
+function showPeer(id){
+  peerModalId = id;
+  var k = known[id]||{};
+  $('pTitle').textContent = nameOf(id);
+  $('pInfo').textContent = 'شناسه: '+id+' · '+(isOnline(id)?'همین حالا متصل':'در دسترس نیست');
+  $('pCode').textContent = k.code || '--------';
+  var ts = trustState(id);
+  $('pVerify').textContent = ts==='ok' ? 'تأیید شده ✓ (برداشتن تأیید)' : 'این کد درست است — تأیید می‌کنم';
+  $('peerModal').classList.add('show');
+}
+$('pVerify').onclick = function(){
+  var id = peerModalId, k = known[id]||{};
+  if (trustState(id)==='ok'){ delete trusted[id]; toast('تأیید برداشته شد'); }
+  else { trusted[id] = k.code || ''; toast('تأیید شد'); }
+  save(); $('peerModal').classList.remove('show'); renderList(); if (open) renderHead();
+};
+$('pOpen').onclick = function(){ $('peerModal').classList.remove('show'); openChat(peerModalId); };
+$('pClose').onclick = function(){ $('peerModal').classList.remove('show'); };
+
+/* ---------------- منو ---------------- */
+$('back').onclick = backToList;
+$('menuBtn').onclick = function(){ renderStatus(); $('menuModal').classList.add('show'); };
+$('mClose').onclick = function(){ $('menuModal').classList.remove('show'); };
+$('mShare').onclick = function(){ N.shareApp(); $('menuModal').classList.remove('show'); };
+$('mChangeName').onclick = function(){
+  $('menuModal').classList.remove('show');
+  $('nameInput').value = me.name; $('nameModal').classList.add('show');
+};
+$('mFast').onclick = function(){
+  fastMode = !fastMode; renderStatus(); N.setFastMode(fastMode);
+  toast(fastMode ? 'حالت پرسرعت روشن شد — روی گوشی‌های دیگر هم روشن کنید' : 'حالت پرسرعت خاموش شد');
+};
+$('mRestart').onclick = function(){ N.restart(); $('menuModal').classList.remove('show'); toast('شبکه از نو راه‌اندازی شد'); };
+$('mClear').onclick = function(){
+  msgs={}; unread={}; save(); renderList(); if (open) renderMsgs();
+  $('menuModal').classList.remove('show'); toast('پیام‌ها پاک شد');
+};
+$('nameSave').onclick = function(){
+  var v = $('nameInput').value.trim(); if (!v) return;
+  me.name = v; LS.set('name', v); N.setName(v);
+  $('nameModal').classList.remove('show'); renderStatus(); toast('نام ذخیره شد');
+};
+
+/* ---------------- شروع ---------------- */
+(function boot(){
+  try { var st = JSON.parse(N.state()); me.id = st.id; me.code = st.code || '--------';
+        fastMode = !!st.fastMode; if (!me.name) me.name = st.name; } catch(e){}
+  if (!me.name) $('nameModal').classList.add('show');
+  else if (IS_NATIVE) N.setName(me.name);
+  renderStatus(); renderList(); N.refresh();
+  setInterval(function(){ N.refresh(); }, 4000);
+})();
+</script>
+</body>
+  </html>
