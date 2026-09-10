@@ -132,6 +132,8 @@ header .ttl span{font-size:11.5px;color:var(--muted)}
   <div class="code" id="myCode">-- -- -- --</div>
   <p>این «کد تأیید» شماست. برای اینکه دیگران مطمئن شوند پیام‌ها واقعاً از شماست،
      این ۸ رقم را رو در رو یا با تماس تلفنی به آن‌ها بگویید.</p>
+  <button class="btn" id="mFriends">فهرست دوستان</button>
+  <button class="btn ghost" id="mAddFriend">افزودن دوست با شناسه</button>
   <button class="btn" id="mShare">فرستادن اپ به گوشی بغلی</button>
   <button class="btn ghost" id="mChangeName">تغییر نام</button>
   <div class="sw" id="mFast"><span>حالت پرسرعت (وای‌فای دایرکت)</span><i></i></div>
@@ -140,6 +142,20 @@ header .ttl span{font-size:11.5px;color:var(--muted)}
   <button class="btn ghost" id="mRestart">راه‌اندازی دوبارهٔ شبکه</button>
   <button class="btn ghost" id="mClear">پاک کردن همهٔ پیام‌ها</button>
   <button class="btn ghost" id="mClose">بستن</button>
+</div></div>
+<div class="modal" id="friendsModal"><div class="card">
+  <h3>فهرست دوستان</h3>
+  <p>دوستان بر اساس شناسهٔ ۱۰ رقمی ذخیره می‌شوند. اگر دوستی فعلاً آفلاین باشد، همچنان در این فهرست می‌ماند.</p>
+  <div id="friendsList"></div>
+  <button class="btn" id="fAdd">+ افزودن دوست</button>
+  <button class="btn ghost" id="fClose">بستن</button>
+</div></div>
+<div class="modal" id="addFriendModal"><div class="card">
+  <h3>افزودن دوست</h3>
+  <p>شناسهٔ ۱۰ رقمی دوست را وارد کنید؛ نمونه: <b>1a2b3c4d5e</b></p>
+  <input id="friendIdInput" inputmode="text" maxlength="10" autocomplete="off" placeholder="شناسهٔ دوست">
+  <button class="btn" id="friendSave">افزودن</button>
+  <button class="btn ghost" id="friendCancel">انصراف</button>
 </div></div>
 <div class="modal" id="peerModal"><div class="card">
   <div class="avBig" id="pAvatarBox">?</div>
@@ -173,6 +189,7 @@ var me = { id:'?', name:LS.get('name',''), code:'--------', avatar:LS.get('avata
 var peers = [];
 var known = {};
 var trusted = LS.get('trusted', {});
+var friends = LS.get('friends', []);
 var msgs = LS.get('msgs', {});
 var unread = LS.get('unread', {});
 var link = 'bt', fastMode = false, open = null, peerModalId = null;
@@ -185,7 +202,7 @@ var tstr = function(t){ var d=new Date(t),h=d.getHours(),m=d.getMinutes();
 var initial = function(s){ s=(s||'?').trim(); return s?s[0]:'?'; };
 function toast(t){ var e=$('toast'); e.textContent=t; e.classList.add('show');
   clearTimeout(toast._t); toast._t=setTimeout(function(){ e.classList.remove('show'); },2800); }
-function save(){ LS.set('msgs',msgs); LS.set('unread',unread); LS.set('trusted',trusted); }
+function save(){ LS.set('msgs',msgs); LS.set('unread',unread); LS.set('trusted',trusted); LS.set('friends',friends); }
 function nameOf(id){ return (known[id] && known[id].name) || id; }
 function isOnline(id){ for (var i=0;i<peers.length;i++) if (peers[i].id===id) return true; return false; }
 function trustState(id){
@@ -286,6 +303,7 @@ function renderList(){
     if (!all && ts==='ok')  v = '<span class="vfy ok">تأییدشده</span>';
     if (!all && ts==='new') v = '<span class="vfy">تأیید نشده</span>';
     if (!all && ts==='bad') v = '<span class="vfy bad">کد عوض شد!</span>';
+    if (!all && isFriend(k)) v += '<span class="vfy ok">دوست</span>';
     var lastTx = last
       ? ((last.from===me.id?'شما: ':(all?(last.name||'')+': ':'')) +
          (last.kind==='image'?'🖼 تصویر':(last.text||'')))
@@ -415,6 +433,45 @@ $('file').onchange = function(){
     sendNow('image','',out);
   };
   img.src = url;
+};
+
+function isFriend(id){ return friends.indexOf(id) >= 0; }
+function renderFriends(){
+  var html='';
+  if (!friends.length) html='<div class="hint">هنوز دوستی اضافه نشده است.</div>';
+  for (var i=0;i<friends.length;i++){
+    var id=friends[i], k=known[id]||{}, nm=k.name||id;
+    html += '<div class="row" data-fid="'+esc(id)+'">'+
+      '<div class="av">'+avatarHtml(id,nm)+'</div>'+
+      '<div class="info"><div class="nm">'+esc(nm)+
+      (isOnline(id)?' <span class="dot on" style="width:7px;height:7px"></span>':'')+'</div>'+
+      '<div class="ls">'+esc(id)+' · '+(isOnline(id)?'متصل':'آفلاین')+'</div></div>'+
+      '<button class="ib" data-remove="'+esc(id)+'" title="حذف">×</button></div>';
+  }
+  $('friendsList').innerHTML=html;
+  var rows=document.querySelectorAll('#friendsList .row');
+  for(var r=0;r<rows.length;r++) (function(el){
+    var id=el.getAttribute('data-fid');
+    el.onclick=function(e){ if(e.target && e.target.getAttribute('data-remove')) return; $('friendsModal').classList.remove('show');
+      if(known[id] && known[id].hasKey) openChat(id); else toast('این دوست هنوز در شبکه دیده نشده است'); };
+    var rm=el.querySelector('[data-remove]'); if(rm) rm.onclick=function(e){ e.stopPropagation(); friends=friends.filter(function(x){return x!==id;}); save(); renderFriends(); renderList(); toast('دوست حذف شد'); };
+  })(rows[r]);
+}
+function openAddFriend(){
+  $('friendIdInput').value=''; $('friendsModal').classList.remove('show'); $('addFriendModal').classList.add('show'); $('friendIdInput').focus();
+}
+$('mFriends').onclick=function(){ renderFriends(); $('menuModal').classList.remove('show'); $('friendsModal').classList.add('show'); };
+$('mAddFriend').onclick=function(){ $('menuModal').classList.remove('show'); openAddFriend(); };
+$('fAdd').onclick=openAddFriend;
+$('fClose').onclick=function(){ $('friendsModal').classList.remove('show'); };
+$('friendCancel').onclick=function(){ $('addFriendModal').classList.remove('show'); };
+$('friendSave').onclick=function(){
+  var id=$('friendIdInput').value.trim().toLowerCase();
+  if(!/^[0-9a-f]{10}$/.test(id)){ toast('شناسه باید دقیقاً ۱۰ رقم هگزادسیمال باشد'); return; }
+  if(id===String(me.id).toLowerCase()){ toast('شناسهٔ خودتان را نمی‌توانید اضافه کنید'); return; }
+  if(friends.indexOf(id)<0) friends.push(id);
+  save(); $('addFriendModal').classList.remove('show'); renderFriends(); $('friendsModal').classList.add('show'); renderList();
+  toast('دوست اضافه شد');
 };
 
 function showPeer(id){
