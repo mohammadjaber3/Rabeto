@@ -2,6 +2,7 @@ package com.rabeto.app.storage;
 
 import androidx.room.Entity;
 import androidx.room.Index;
+import androidx.annotation.NonNull;
 
 @Entity(
         tableName = "stored_messages",
@@ -16,6 +17,7 @@ import androidx.room.Index;
 )
 public class StoredMessage {
 
+    @NonNull
     public String messageId;
     public String senderId;
     public String recipientId;
@@ -32,7 +34,7 @@ public class StoredMessage {
     public long nextAttemptAt;
 
     public StoredMessage(
-            String messageId,
+            @NonNull String messageId,
             String senderId,
             String recipientId,
             String envelopeJson,
