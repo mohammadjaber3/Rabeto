@@ -3,7 +3,7 @@ package com.rabeto.app;
 import android.content.SharedPreferences;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
-import android.security.keystore.KeyStore;
+import java.security.KeyStore;
 
 import android.util.Base64;
 
