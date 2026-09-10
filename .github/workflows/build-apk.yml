@@ -3,6 +3,8 @@ name: ساخت APK رابطو
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*.*.*'
   workflow_dispatch:
 
 permissions:
@@ -11,6 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
       - name: گرفتن کدها
         uses: actions/checkout@v4
@@ -31,43 +34,89 @@ jobs:
 
       - name: آماده‌سازی Gradle
         uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '8.11.1'
+
+      - name: تعیین نسخه Build
+        id: version
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+
+            if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "فرمت نسخه نامعتبر است: $VERSION"
+              exit 1
+            fi
+
+            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
+            VERSION_CODE=$((MAJOR * 10000 + MINOR * 100 + PATCH))
+
+            echo "name=$VERSION" >> "$GITHUB_OUTPUT"
+            echo "code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+            echo "release=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=0.1.0-debug" >> "$GITHUB_OUTPUT"
+            echo "code=1" >> "$GITHUB_OUTPUT"
+            echo "release=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: بازسازی کلید امضا
+        if: steps.version.outputs.release == 'true'
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
             echo "$KEYSTORE_B64" | base64 -d > app/rabeto.jks
-            echo "کلید امضای دائمی پیدا شد."
+            echo "کلید امضای Release پیدا شد."
           else
-            echo "کلید امضا تنظیم نشده — با کلید debug امضا می‌شود."
+            echo "کلید امضای Release تنظیم نشده است."
+            exit 1
           fi
 
       - name: ساخت APK
         env:
+          RABETO_VERSION_NAME: ${{ steps.version.outputs.name }}
+          RABETO_VERSION_CODE: ${{ steps.version.outputs.code }}
           RABETO_STORE_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
           RABETO_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           RABETO_KEY_PASS: ${{ secrets.KEY_PASSWORD }}
-        run: gradle assembleRelease --no-daemon --stacktrace
+        run: |
+          chmod +x ./gradlew
 
-      - name: تغییر نام فایل
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            ./gradlew assembleRelease --no-daemon --stacktrace
+          else
+            ./gradlew assembleDebug --no-daemon --stacktrace
+          fi
+
+      - name: آماده‌سازی APK آزمایشی
+        if: steps.version.outputs.release == 'false'
         run: |
           mkdir -p out
-          cp app/build/outputs/apk/release/*.apk "out/Rabeto-v${{ github.run_number }}.apk"
+          cp app/build/outputs/apk/debug/*.apk \
+            "out/Rabeto-debug-build-${GITHUB_RUN_NUMBER}.apk"
           ls -lh out
 
-      - name: بارگذاری فایل APK
+      - name: آماده‌سازی APK رسمی
+        if: steps.version.outputs.release == 'true'
+        run: |
+          mkdir -p out
+          cp app/build/outputs/apk/release/*.apk \
+            "out/Rabeto-v${{ steps.version.outputs.name }}.apk"
+          ls -lh out
+
+      - name: بارگذاری APK آزمایشی
+        if: steps.version.outputs.release == 'false'
         uses: actions/upload-artifact@v4
         with:
-          name: Rabeto-APK
+          name: Rabeto-debug-build-${{ github.run_number }}
           path: out/*.apk
+          retention-days: 14
 
-      - name: انتشار در بخش Releases
+      - name: انتشار نسخه رسمی
+        if: steps.version.outputs.release == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ github.run_number }}
-          name: Rabeto v${{ github.run_number }}
-          body: نسخهٔ ساخته‌شدهٔ خودکار — فایل APK را از پایین دانلود کنید.
+          tag_name: ${{ github.ref_name }}
+          name: Rabeto ${{ steps.version.outputs.name }}
+          generate_release_notes: true
           files: out/*.apk
