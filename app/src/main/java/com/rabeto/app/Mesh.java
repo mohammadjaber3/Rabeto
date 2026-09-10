@@ -45,8 +45,7 @@ import java.util.List;
 import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتو... */
 public class Mesh {
   private static final String TAG = "RabetoMesh";
-  private static final String SERVICE_ID = "com.rabeto.mesh.v1";
-  private static final int MAX_TTL = 6;
+  private static final String SERVICE_ID = "com.rabeto.mesh.v5";
   private static final int CACHE_MAX = 250;
   private static final int SEEN_MAX = 3000;
   private static final long CACHE_TTL_MS = 24L * 60 * 60 * 1000;
@@ -57,6 +56,7 @@ public class Mesh {
   private final Handler ui = new Handler(Looper.getMainLooper());
   private final SharedPreferences prefs;
   private final Ident ident;
+  private final SessionManager sessions;
 
   private final Map<String, String[]> peers = new LinkedHashMap<String, String[]>();  // endpoint -> {id,name}
   private final Map<String, String[]> found = new LinkedHashMap<String, String[]>();
@@ -79,6 +79,7 @@ public class Mesh {
       this.client = Nearby.getConnectionsClient(ctx);
       this.prefs = ctx.getSharedPreferences("rabeto", Context.MODE_PRIVATE);
       this.ident = new Ident(prefs);
+      this.sessions = new SessionManager(ident);
       this.fastMode = prefs.getBoolean("fastMode", false);
 
       if (ident.ok()) {
@@ -112,6 +113,7 @@ public class Mesh {
       try { client.stopDiscovery(); } catch (Throwable ignored) {}
       peers.clear();
       found.clear();
+      sessions.clear();
   }
 
   private Strategy strategy() {
@@ -239,7 +241,7 @@ public class Mesh {
       @Override
       public void onPayloadReceived(String endpointId, Payload payload) {
           byte[] bytes = payload.asBytes();
-          if (bytes == null) return;
+          if (!Protocol.validPacketSize(bytes)) return;
           try {
               JSONObject o = new JSONObject(new String(bytes, StandardCharsets.UTF_8));
               String t = o.optString("t", "msg");
@@ -258,28 +260,57 @@ public class Mesh {
 
   private void sendHello(String endpointId) {
       try {
+          if (!ident.ok()) return;
+
           JSONObject o = new JSONObject();
           o.put("t", "hello");
+          o.put("v", Protocol.VERSION);
           o.put("id", myId);
           o.put("name", myName);
           o.put("av", myAvatar);
           o.put("pk", ident.pubKey());
-          client.sendPayload(endpointId, Payload.fromBytes(o.toString().getBytes(StandardCharsets.UTF_8)));
+          o.put("sig", ident.sign(Protocol.canonicalHello(o)));
+
+          byte[] packet = o.toString().getBytes(StandardCharsets.UTF_8);
+          if (!Protocol.validPacketSize(packet)) return;
+
+          client.sendPayload(endpointId, Payload.fromBytes(packet));
       } catch (Throwable ignored) {}
   }
 
   private void handleHello(String endpointId, JSONObject o) {
+      if (!Protocol.validHello(o)) return;
+
       String uid = o.optString("id", "");
       String nm = o.optString("name", uid);
       String pk = o.optString("pk", "");
-      if (uid.length() == 0) return;
+      String sig = o.optString("sig", "");
+
+      if (uid.length() == 0 || uid.equals(myId)) return;
+
+      // Authenticate the identity announcement before trusting or persisting
+      // its public key, name, or avatar.
+      if (!Ident.verify(pk, Protocol.canonicalHello(o), sig)) return;
+
+      int keyState = learnKey(uid, pk);
+      if (keyState == -1) return;
+
+      if (keyState == -2) {
+          sessions.remove(uid);
+          emitSecurityEvent("identity_changed", uid);
+          return;
+      }
+
+      if (keyState != 1 || !sessions.establish(uid, pk)) return;
+
       names.put(uid, nm);
       String av = o.optString("av", "");
       if (av.length() > 0) avatars.put(uid, av);
-      learnKey(uid, pk);
+
       String[] tag = new String[]{uid, nm};
       found.put(endpointId, tag);
       if (peers.containsKey(endpointId)) peers.put(endpointId, tag);
+
       saveState();
       emitStatus();
   }
@@ -296,25 +327,43 @@ public class Mesh {
 
   // ---------------------------------------------------------------- messages
   private String canonical(JSONObject e) {
-      return e.optString("id") + "|" + e.optString("from") + "|" + e.optString("name") + "|"
-              + e.optString("to") + "|" + e.optString("kind") + "|" + e.optLong("ts") + "|"
-              + e.optInt("enc") + "|" + e.optString("text") + "|" + e.optString("data");
+      return Protocol.canonicalMessage(e);
+  }
+
+  private String aad(JSONObject e) {
+      return e.optInt("v") + "|" + e.optString("id") + "|"
+              + e.optString("from") + "|" + e.optString("to") + "|"
+              + e.optString("kind") + "|" + e.optLong("ts") + "|"
+              + e.optInt("enc") + "|" + e.optString("pk");
   }
 
   private void handleIncoming(String fromEndpoint, JSONObject env) {
+      if (!Protocol.validEnvelope(env, System.currentTimeMillis())) return;
       String mid = env.optString("id", "");
       if (mid.length() == 0 || seen.contains(mid)) return;
-      remember(mid);
 
       String from = env.optString("from", "");
       String pk = env.optString("pk", "");
       boolean isNew = !pubKeys.containsKey(from) || !names.containsKey(from);
-      int keyState = learnKey(from, pk);
-      boolean sigOk = false;
-      if (keyState == 1) sigOk = Ident.verify(pk, canonical(env), env.optString("sig", ""));
 
-      // کسی که پیامش از راه واسطه رسیده هم باید در لیست مخاطبان ظاهر شود
-      if (keyState == 1 && !from.equals(myId)) {
+      // Authenticate with the presented public key before changing
+      // persistent identity state. This makes first contact proof-of-possession.
+      boolean sigOk = Ident.verify(pk, canonical(env), env.optString("sig", ""));
+      if (!sigOk) return;
+
+      int keyState = learnKey(from, pk);
+      if (keyState == -1) return;
+      if (keyState == -2) {
+          sessions.remove(from);
+          emitSecurityEvent("identity_changed", from);
+          return;
+      }
+      if (keyState != 1 || !sessions.establish(from, pk)) return;
+
+      // Only authenticated messages enter replay state or the store-and-forward cache.
+      remember(mid);
+
+      if (!from.equals(myId)) {
           String nm = env.optString("name", from);
           if (nm.length() > 0) names.put(from, nm);
           if (isNew) { saveState(); emitStatus(); }
@@ -324,17 +373,16 @@ public class Mesh {
 
       String to = env.optString("to", "*");
       boolean forMe = "*".equals(to) || myId.equals(to);
-
       if (forMe) {
           JSONObject out = clone(env);
           try {
-              out.put("verified", sigOk);
-              out.put("keyChanged", keyState == -2);
-              out.put("fake", keyState == -1);
+              out.put("verified", true);
+              out.put("keyChanged", false);
+              out.put("fake", false);
               if (env.optInt("enc", 0) == 1 && myId.equals(to)) {
-                  String txt = ident.decrypt(pk, env.optString("text", ""));
+                  String txt = sessions.decrypt(from, env.optString("text", ""), aad(env));
                   String dat = env.optString("data", "").length() > 0
-                          ? ident.decrypt(pk, env.optString("data", "")) : "";
+                          ? sessions.decrypt(from, env.optString("data", ""), aad(env)) : "";
                   out.put("text", txt == null ? "" : txt);
                   out.put("data", dat == null ? "" : dat);
                   out.put("opened", txt != null);
@@ -342,19 +390,19 @@ public class Mesh {
           } catch (Throwable ignored) {}
           emit(wrap("message", out));
 
-          // رسید خودکار: به فرستنده خبر بده که پیام رسید
-          if (myId.equals(to) && sigOk && !"ack".equals(env.optString("kind", ""))) {
+          if (myId.equals(to) && !"ack".equals(env.optString("kind", ""))) {
               sendEnvelope(from, "ack", mid, "", false);
           }
       }
 
       if (!myId.equals(to)) {
           int ttl = env.optInt("ttl", 0);
-          if (ttl > 0) {
+          int hops = env.optInt("hops", 0);
+          if (ttl > 0 && hops < Protocol.MAX_HOPS) {
               JSONObject fwd = clone(env);
               try {
                   fwd.put("ttl", ttl - 1);
-                  fwd.put("hops", env.optInt("hops", 0) + 1);
+                  fwd.put("hops", hops + 1);
               } catch (Throwable ignored) {}
               sendRaw(fwd, fromEndpoint);
           }
@@ -365,37 +413,52 @@ public class Mesh {
   private String sendEnvelope(String to, String kind, String text, String data, boolean wantEncrypt) {
       try {
           JSONObject e = new JSONObject();
-          String mid = myId + "-" + System.currentTimeMillis() + "-" + (int) (Math.random() * 9999);
-          boolean enc = false;
+          String mid = Crypto.randomId(myId);
           String outText = text == null ? "" : text;
           String outData = data == null ? "" : data;
 
-          if (wantEncrypt && !"*".equals(to)) {
-              String theirPk = pubKeys.get(to);
-              if (theirPk != null && ident.ok()) {
-                  String t2 = ident.encrypt(theirPk, outText);
-                  String d2 = outData.length() > 0 ? ident.encrypt(theirPk, outData) : "";
-                  if (t2.length() > 0 && (outData.length() == 0 || d2.length() > 0)) {
-                      outText = t2; outData = d2; enc = true;
-                  }
-              }
-          }
-
+          long ts = System.currentTimeMillis();
           e.put("t", "msg");
-          e.put("v", 2);
+          e.put("v", Protocol.VERSION);
           e.put("id", mid);
           e.put("from", myId);
           e.put("name", myName);
           e.put("to", to);
           e.put("kind", kind);
-          e.put("ts", System.currentTimeMillis());
-          e.put("enc", enc ? 1 : 0);
+          e.put("ts", ts);
+          e.put("enc", 0);
           e.put("text", outText);
           e.put("data", outData);
           e.put("pk", ident.pubKey());
-          e.put("sig", ident.sign(canonical(e)));
-          e.put("ttl", MAX_TTL);
+          e.put("ttl", Protocol.MAX_TTL);
           e.put("hops", 0);
+
+          if (wantEncrypt && !"*".equals(to)) {
+              // Private messages must fail closed. Never silently downgrade
+              // an encryption request to plaintext.
+              if (!ident.ok()) return "";
+
+              String theirPk = pubKeys.get(to);
+              if (theirPk == null || theirPk.length() == 0) return "";
+
+              if (!sessions.has(to) && !sessions.establish(to, theirPk)) return "";
+
+              e.put("enc", 1);
+              String aad = aad(e);
+              String t2 = sessions.encrypt(to, outText, aad);
+              String d2 = outData.length() > 0 ? sessions.encrypt(to, outData, aad) : "";
+
+              if (t2.length() > 0 && (outData.length() == 0 || d2.length() > 0)) {
+                  outText = t2;
+                  outData = d2;
+                  e.put("text", outText);
+                  e.put("data", outData);
+              } else {
+                  return "";
+              }
+          }
+
+          e.put("sig", ident.sign(canonical(e)));
 
           remember(mid);
           cacheAdd(e);
@@ -415,7 +478,9 @@ public class Mesh {
       }
       if (targets.isEmpty()) return;
       try {
-          Payload p = Payload.fromBytes(env.toString().getBytes(StandardCharsets.UTF_8));
+          byte[] packet = env.toString().getBytes(StandardCharsets.UTF_8);
+          if (packet.length > Protocol.MAX_PACKET_BYTES) return;
+          Payload p = Payload.fromBytes(packet);
           client.sendPayload(targets, p);
       } catch (Throwable t) {
           Log.w(TAG, "send failed: " + t.getMessage());
@@ -449,7 +514,7 @@ public class Mesh {
       for (JSONObject env : snapshot) {
           if (now - env.optLong("ts", now) > CACHE_TTL_MS) continue;
           JSONObject c = clone(env);
-          try { if (c.optInt("ttl", 0) < 1) c.put("ttl", 1); } catch (Throwable ignored) {}
+          if (c.optInt("ttl", 0) <= 0 || c.optInt("hops", 0) >= Protocol.MAX_HOPS) continue;
           try {
               client.sendPayload(endpointId, Payload.fromBytes(c.toString().getBytes(StandardCharsets.UTF_8)));
           } catch (Throwable ignored) {}
@@ -568,6 +633,16 @@ public class Mesh {
               known.put(en.getKey(), k);
           }
           o.put("known", known);
+          emit(o);
+      } catch (Throwable ignored) {}
+  }
+
+  private void emitSecurityEvent(String code, String peerId) {
+      try {
+          JSONObject o = new JSONObject();
+          o.put("type", "security");
+          o.put("code", code);
+          o.put("peer", peerId == null ? "" : peerId);
           emit(o);
       } catch (Throwable ignored) {}
   }

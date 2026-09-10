@@ -139,6 +139,20 @@ public class Ident {
         return pubB64;
     }
 
+    /**
+     * Derive the ECDH shared secret while keeping the identity private key behind
+     * the identity boundary. The returned secret is temporary session material.
+     */
+    byte[] sharedSecretForSession(String peerPublicKeyB64) throws Exception {
+        if (!ok || priv == null) throw new Exception("identity unavailable");
+        PublicKey peer = KeyFactory.getInstance("EC").generatePublic(
+                new X509EncodedKeySpec(Base64.decode(peerPublicKeyB64, Base64.NO_WRAP)));
+        KeyAgreement agreement = KeyAgreement.getInstance("ECDH");
+        agreement.init(priv);
+        agreement.doPhase(peer, true);
+        return agreement.generateSecret();
+    }
+
     public String code() {
         return codeFor(pubB64);
     }
