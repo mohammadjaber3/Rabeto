@@ -42,13 +42,14 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
-import java.util.Map;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتو... */
+import java.util.Map;
+import com.rabeto.app.storage.MessageStore;
+import com.rabeto.app.storage.RoomMessageStore;
+import com.rabeto.app.storage.StoredMessage;/**•شبکهٔ مِش رابطو.••ترتیب انتخاب راه ارتباطی را خودِ Nearby Connections انجام می‌دهد:•ابتدا با بلوتو... */
 public class Mesh {
   private static final String TAG = "RabetoMesh";
   private static final String SERVICE_ID = "com.rabeto.mesh.v5";
-  private static final int CACHE_MAX = 250;
-  private static final int SEEN_MAX = 3000;
-  private static final long CACHE_TTL_MS = 24L * 60 * 60 * 1000;
+    private static final int SEEN_MAX = 3000;
 
   private final Context ctx;
   private final WebView web;
@@ -57,6 +58,7 @@ public class Mesh {
   private final SharedPreferences prefs;
   private final Ident ident;
   private final SessionManager sessions;
+  private final MessageStore messageStore;
 
   private final Map<String, String[]> peers = new LinkedHashMap<String, String[]>();  // endpoint -> {id,name}
   private final Map<String, String[]> found = new LinkedHashMap<String, String[]>();
@@ -65,7 +67,6 @@ public class Mesh {
   private final Map<String, String> names = new HashMap<String, String>();            // userId -> name
   private final Map<String, String> avatars = new HashMap<String, String>();          // userId -> عکس (base64)
   private final LinkedHashSet<String> seen = new LinkedHashSet<String>();
-  private final LinkedList<JSONObject> cache = new LinkedList<JSONObject>();
 
   private String myId;
   private String myName;
@@ -80,6 +81,7 @@ public class Mesh {
       this.prefs = ctx.getSharedPreferences("rabeto", Context.MODE_PRIVATE);
       this.ident = new Ident(prefs);
       this.sessions = new SessionManager(ident);
+      this.messageStore = new RoomMessageStore(ctx);
       this.fastMode = prefs.getBoolean("fastMode", false);
 
       if (ident.ok()) {
@@ -114,6 +116,11 @@ public class Mesh {
       peers.clear();
       found.clear();
       sessions.clear();
+  }
+
+  public void close() {
+      stop();
+      messageStore.close();
   }
 
   private Strategy strategy() {
@@ -210,8 +217,9 @@ public class Mesh {
               peers.put(endpointId, tag);
               names.put(tag[0], tag[1]);
               emitStatus();
+              // Cache is flushed only after the peer's Hello is
+              // authenticated and its session is established.
               sendHello(endpointId);
-              flushCacheTo(endpointId);
           } else {
               Log.w(TAG, "connection result " + res.getStatus().getStatusCode());
           }
@@ -313,6 +321,10 @@ public class Mesh {
 
       saveState();
       emitStatus();
+
+      // The peer is now authenticated and the session is established.
+      // Only now is it safe to send stored messages to this endpoint.
+      flushCacheTo(endpointId);
   }
 
   /** اعتماد در اولین برخورد: کلید را ذخیره می‌کنیم و از آن پس عوض شدنش هشدار می‌دهد */
@@ -369,10 +381,32 @@ public class Mesh {
           if (isNew) { saveState(); emitStatus(); }
       }
 
-      cacheAdd(env);
-
       String to = env.optString("to", "*");
       boolean forMe = "*".equals(to) || myId.equals(to);
+
+      final boolean isAck = "ack".equals(env.optString("kind", ""));
+
+      // Messages authenticated for this device become persistent Inbox
+      // history. Do not put protocol ACKs into the user's conversation.
+      if (forMe && myId.equals(to) && !isAck) {
+          cacheAdd(env, MessageStore.ROLE_INBOX,
+                  MessageStore.STATUS_DELIVERED);
+      }
+
+      // Broadcast messages belong to both the local Inbox and the relay
+      // cache because they may still need to reach other peers.
+      if (forMe && "*".equals(to) && !myId.equals(from) && !isAck) {
+          cacheAdd(env, MessageStore.ROLE_INBOX,
+                  MessageStore.STATUS_DELIVERED);
+      }
+
+      // Messages destined for another identity are stored temporarily
+      // for store-and-forward.
+      if (!myId.equals(from) && !myId.equals(to)) {
+          cacheAdd(env, MessageStore.ROLE_RELAY,
+                  MessageStore.STATUS_QUEUED);
+      }
+
       if (forMe) {
           JSONObject out = clone(env);
           try {
@@ -461,7 +495,8 @@ public class Mesh {
           e.put("sig", ident.sign(canonical(e)));
 
           remember(mid);
-          cacheAdd(e);
+          cacheAdd(e, MessageStore.ROLE_OUTBOX,
+                  MessageStore.STATUS_QUEUED);
           sendRaw(e, null);
           return mid;
       } catch (Throwable t) {
@@ -487,7 +522,95 @@ public class Mesh {
       }
   }
 
-  // ---------------------------------------------------------------- cache
+  /**
+   * Sends authenticated stored messages to a newly authenticated peer.
+   *
+   * Important:
+   * - This method is called only after Hello authentication/session setup.
+   * - Transport success is NOT treated as message delivery.
+   * - Outbox and relay records remain stored until a real delivery state
+   *   transition is implemented by the authenticated ACK protocol.
+   */
+  private void flushCacheTo(final String endpointId) {
+      if (endpointId == null || endpointId.length() == 0) return;
+
+      final long now = System.currentTimeMillis();
+
+      messageStore.active(
+              MessageStore.ROLE_OUTBOX,
+              now,
+              120,
+              new MessageStore.ResultCallback<List<StoredMessage>>() {
+                  @Override
+                  public void onResult(List<StoredMessage> messages) {
+                      sendStoredMessages(endpointId, messages);
+                  }
+              });
+
+      messageStore.active(
+              MessageStore.ROLE_RELAY,
+              now,
+              120,
+              new MessageStore.ResultCallback<List<StoredMessage>>() {
+                  @Override
+                  public void onResult(List<StoredMessage> messages) {
+                      sendStoredMessages(endpointId, messages);
+                  }
+              });
+  }
+
+  private void sendStoredMessages(
+          final String endpointId,
+          List<StoredMessage> messages) {
+
+      if (endpointId == null || endpointId.length() == 0) return;
+      if (messages == null || messages.isEmpty()) return;
+
+      for (StoredMessage stored : messages) {
+          if (stored == null || stored.envelopeJson == null) continue;
+
+          try {
+              JSONObject env = new JSONObject(stored.envelopeJson);
+
+              if (!Protocol.validEnvelope(
+                      env,
+                      System.currentTimeMillis())) {
+                  continue;
+              }
+
+              int ttl = env.optInt("ttl", 0);
+              int hops = env.optInt("hops", 0);
+
+              if (ttl <= 0 || hops >= Protocol.MAX_HOPS) {
+                  continue;
+              }
+
+              byte[] packet = env.toString()
+                      .getBytes(StandardCharsets.UTF_8);
+
+              if (!Protocol.validPacketSize(packet)) continue;
+
+              /*
+               * Record a transport attempt only after the payload has
+               * passed all local validation and is about to be sent.
+               * This does not mean the destination received it.
+               */
+              messageStore.recordAttempt(
+                      stored.messageId,
+                      stored.role,
+                      System.currentTimeMillis(),
+                      null);
+
+              client.sendPayload(
+                      endpointId,
+                      Payload.fromBytes(packet));
+
+          } catch (Throwable t) {
+              Log.w(TAG, "stored send failed: " + t.getMessage());
+          }
+      }
+  }
+
   private JSONObject clone(JSONObject o) {
       try { return new JSONObject(o.toString()); } catch (Throwable t) { return o; }
   }
@@ -501,73 +624,113 @@ public class Mesh {
       }
   }
 
-  private void cacheAdd(JSONObject env) {
-      cache.addLast(env);
-      while (cache.size() > CACHE_MAX) cache.removeFirst();
-      saveState();
-  }
+  private void cacheAdd(JSONObject env, int role, int status) {
+      if (env == null) return;
 
-  private void flushCacheTo(String endpointId) {
-      long now = System.currentTimeMillis();
-      int sent = 0;
-      List<JSONObject> snapshot = new ArrayList<JSONObject>(cache);
-      for (JSONObject env : snapshot) {
-          if (now - env.optLong("ts", now) > CACHE_TTL_MS) continue;
-          JSONObject c = clone(env);
-          if (c.optInt("ttl", 0) <= 0 || c.optInt("hops", 0) >= Protocol.MAX_HOPS) continue;
-          try {
-              client.sendPayload(endpointId, Payload.fromBytes(c.toString().getBytes(StandardCharsets.UTF_8)));
-          } catch (Throwable ignored) {}
-          if (++sent > 120) break;
-      }
+      final String mid = env.optString("id", "");
+      final String from = env.optString("from", "");
+      final String to = env.optString("to", "*");
+      final long createdAt = env.optLong(
+              "ts",
+              System.currentTimeMillis()
+      );
+
+      if (mid.length() == 0 || from.length() == 0) return;
+
+      /*
+       * Expiration is derived from the protocol timestamp for now.
+       * The protocol-level expiration policy will be formalized
+       * together with message ACK/delivery semantics.
+       */
+      final long expiresAt = createdAt
+              + Protocol.MESSAGE_TTL_MS;
+
+      final StoredMessage stored = new StoredMessage(
+              mid,
+              from,
+              to,
+              env.toString(),
+              createdAt,
+              expiresAt,
+              role,
+              status
+      );
+
+      messageStore.put(stored, null);
   }
 
   private void saveState() {
       try {
-          JSONArray arr = new JSONArray();
-          for (JSONObject o : cache) {
-              if (o.optString("data", "").length() > 120000) continue;
-              arr.put(o);
-          }
           JSONObject keys = new JSONObject();
-          for (Map.Entry<String, String> en : pubKeys.entrySet()) keys.put(en.getKey(), en.getValue());
+          for (Map.Entry<String, String> en : pubKeys.entrySet()) {
+              keys.put(en.getKey(), en.getValue());
+          }
+
           JSONObject nms = new JSONObject();
-          for (Map.Entry<String, String> en : names.entrySet()) nms.put(en.getKey(), en.getValue());
+          for (Map.Entry<String, String> en : names.entrySet()) {
+              nms.put(en.getKey(), en.getValue());
+          }
+
           JSONObject avs = new JSONObject();
-          for (Map.Entry<String, String> en : avatars.entrySet()) avs.put(en.getKey(), en.getValue());
+          for (Map.Entry<String, String> en : avatars.entrySet()) {
+              avs.put(en.getKey(), en.getValue());
+          }
+
           prefs.edit()
-                  .putString("cache", arr.toString())
                   .putString("keys", keys.toString())
                   .putString("names", nms.toString())
                   .putString("avatars", avs.toString())
                   .apply();
-      } catch (Throwable ignored) {}
+
+      } catch (Throwable ignored) {
+      }
   }
 
   private void loadState() {
       try {
-          JSONArray arr = new JSONArray(prefs.getString("cache", "[]"));
-          for (int i = 0; i < arr.length(); i++) {
-              JSONObject o = arr.getJSONObject(i);
-              cache.addLast(o);
-              remember(o.optString("id", ""));
-          }
-      } catch (Throwable ignored) {}
-      try {
-          JSONObject keys = new JSONObject(prefs.getString("keys", "{}"));
+          JSONObject keys = new JSONObject(
+                  prefs.getString("keys", "{}")
+          );
+
           Iterator<String> it = keys.keys();
-          while (it.hasNext()) { String k = it.next(); pubKeys.put(k, keys.optString(k)); }
-      } catch (Throwable ignored) {}
+
+          while (it.hasNext()) {
+              String k = it.next();
+              pubKeys.put(k, keys.optString(k));
+          }
+
+      } catch (Throwable ignored) {
+      }
+
       try {
-          JSONObject nms = new JSONObject(prefs.getString("names", "{}"));
+          JSONObject nms = new JSONObject(
+                  prefs.getString("names", "{}")
+          );
+
           Iterator<String> it = nms.keys();
-          while (it.hasNext()) { String k = it.next(); names.put(k, nms.optString(k)); }
-      } catch (Throwable ignored) {}
+
+          while (it.hasNext()) {
+              String k = it.next();
+              names.put(k, nms.optString(k));
+          }
+
+      } catch (Throwable ignored) {
+      }
+
       try {
-          JSONObject avs = new JSONObject(prefs.getString("avatars", "{}"));
+          JSONObject avs = new JSONObject(
+                  prefs.getString("avatars", "{}")
+          );
+
           Iterator<String> it = avs.keys();
-          while (it.hasNext()) { String k = it.next(); avatars.put(k, avs.optString(k)); }
-      } catch (Throwable ignored) {}
+
+          while (it.hasNext()) {
+              String k = it.next();
+              avatars.put(k, avs.optString(k));
+          }
+
+      } catch (Throwable ignored) {
+      }
   }
 
   // ---------------------------------------------------------------- to web

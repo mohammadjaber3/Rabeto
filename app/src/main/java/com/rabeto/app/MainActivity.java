@@ -120,7 +120,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
-        if (mesh != null) mesh.stop();
+        if (mesh != null) mesh.close();
         super.onDestroy();
     }
 }
