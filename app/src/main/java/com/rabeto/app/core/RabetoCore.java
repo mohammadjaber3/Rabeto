@@ -329,7 +329,7 @@ public final class RabetoCore implements TransportEvents {
         }
 
         int keyState = Protocol.BROADCAST.equals(env.optString("to", ""))
-                ? learnBroadcastKey(from, pk)
+                ? learnBroadcastKey(from, pk, epk)
                 : learnKey(from, pk, epk);
         if (keyState == -1) return;
         if (keyState == -2) {
@@ -450,17 +450,33 @@ public final class RabetoCore implements TransportEvents {
                 });
     }
 
-    /** Broadcasts authenticate the signing identity but do not require ECDH. */
-    private int learnBroadcastKey(String uid, String pk) {
-        if (pk == null || pk.length() == 0 || !uid.equals(Ident.idFor(pk))) return -1;
+    /**
+     * Broadcasts authenticate the signing identity and distribute the
+     * public ECDH key needed for later private-message sessions.
+     *
+     * Both keys are public and the envelope signature binds them together.
+     */
+    private int learnBroadcastKey(String uid, String pk, String epk) {
+        if (pk == null || pk.length() == 0
+                || epk == null || epk.length() == 0
+                || !uid.equals(Ident.idFor(pk))) {
+            return -1;
+        }
+
         synchronized (this) {
-            String had = pubKeys.get(uid);
-            if (had == null) {
+            String hadPk = pubKeys.get(uid);
+            String hadEpk = ecdhPubKeys.get(uid);
+
+            if (hadPk == null || hadEpk == null) {
                 pubKeys.put(uid, pk);
+                ecdhPubKeys.put(uid, epk);
                 return 1;
             }
-            return had.equals(pk) ? 1 : -2;
+
+            if (!hadPk.equals(pk) || !hadEpk.equals(epk)) return -2;
         }
+
+        return 1;
     }
 
     // ------------------------------------------------------------------- outbound
@@ -484,15 +500,16 @@ public final class RabetoCore implements TransportEvents {
         }
 
         String theirKey;
+        String theirEpk;
         synchronized (this) {
             theirKey = pubKeys.get(to);
+            theirEpk = ecdhPubKeys.get(to);
         }
 
-        if (theirKey == null || theirKey.length() == 0) {
-            // v6 refuses to send a directed message in plaintext, so we cannot
-            // send anything to an identity whose key we have never seen. We park
-            // it as a local draft and materialise it the moment the key arrives.
-            // Cross-mesh key discovery (signed identity gossip) is Phase B.
+        if (theirKey == null || theirKey.length() == 0
+                || theirEpk == null || theirEpk.length() == 0) {
+            // Never degrade a private message to plaintext. Park it locally and
+            // materialise it once both identity keys are available.
             return saveDraft(to, text);
         }
 
@@ -557,7 +574,7 @@ public final class RabetoCore implements TransportEvents {
         e.put("text", body);
         e.put("data", "");
         e.put("pk", ident.pubKey());
-        e.put("epk", Protocol.BROADCAST.equals(to) ? "" : ident.ecdhPubKey());
+        e.put("epk", ident.ecdhPubKey());
         e.put("ttl", Protocol.MAX_TTL);
         e.put("hops", 0);
 

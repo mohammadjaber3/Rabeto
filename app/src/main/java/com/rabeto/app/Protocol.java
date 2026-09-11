@@ -182,7 +182,7 @@ public final class Protocol {
                 || !(BROADCAST.equals(to) || bounded(to, 1, MAX_ID_CHARS))
                 || !bounded(kind, 1, MAX_KIND_CHARS)
                 || !bounded(pk, 1, MAX_PUBLIC_KEY_CHARS)
-                || (!BROADCAST.equals(to) && !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS))
+                || !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS)
                 || !bounded(sig, 1, MAX_SIGNATURE_CHARS)
                 || !bounded(nonce, 8, MAX_NONCE_CHARS)) {
             return false;
