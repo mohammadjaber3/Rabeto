@@ -4,11 +4,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
-/**
- * Per-peer session-key cache. The identity private key stays inside Ident/Keystore.
- * This phase is intentionally not advertised as forward secrecy; ephemeral/ratcheting
- * sessions are a separate protocol phase.
- */
+/** Per-peer session-key cache. */
 public final class SessionManager {
     private static final int MAX_SESSIONS = 2048;
 
@@ -21,11 +17,13 @@ public final class SessionManager {
         this.localId = identity.id();
     }
 
-    public synchronized boolean establish(String peerId, String peerPublicKey) {
-        if (!identity.ok() || peerId == null || peerPublicKey == null) return false;
-        if (!peerId.equals(Ident.idFor(peerPublicKey))) return false;
+    /** Establish using the peer's ECDH public key, never its signing key. */
+    public synchronized boolean establish(String peerId, String peerEcdhPublicKey) {
+        if (!identity.ok() || !identity.ecdhOk()
+                || peerId == null || peerEcdhPublicKey == null
+                || peerEcdhPublicKey.length() == 0) return false;
         try {
-            byte[] shared = identity.sharedSecretForSession(peerPublicKey);
+            byte[] shared = identity.sharedSecretForSession(peerEcdhPublicKey);
             byte[] key = Crypto.deriveSessionKey(shared, localId, peerId);
             Arrays.fill(shared, (byte) 0);
             byte[] old = sessions.put(peerId, key);
@@ -43,9 +41,7 @@ public final class SessionManager {
         try {
             return Crypto.encrypt(key, plaintext,
                     aad == null ? null : aad.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        } catch (Throwable t) {
-            return "";
-        }
+        } catch (Throwable t) { return ""; }
     }
 
     public synchronized String decrypt(String peerId, String blob, String aad) {
@@ -54,9 +50,7 @@ public final class SessionManager {
         try {
             return Crypto.decrypt(key, blob,
                     aad == null ? null : aad.getBytes(java.nio.charset.StandardCharsets.UTF_8));
-        } catch (Throwable t) {
-            return null;
-        }
+        } catch (Throwable t) { return null; }
     }
 
     public synchronized void remove(String peerId) {
@@ -69,13 +63,8 @@ public final class SessionManager {
         sessions.clear();
     }
 
-    public synchronized boolean has(String peerId) {
-        return sessions.containsKey(peerId);
-    }
-
-    public synchronized int size() {
-        return sessions.size();
-    }
+    public synchronized boolean has(String peerId) { return sessions.containsKey(peerId); }
+    public synchronized int size() { return sessions.size(); }
 
     private void trim() {
         while (sessions.size() > MAX_SESSIONS) {

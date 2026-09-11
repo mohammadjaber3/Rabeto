@@ -16,15 +16,20 @@ import java.security.spec.ECGenParameterSpec;
 public final class TestKeys {
 
     public final KeyPair pair;
+    public final KeyPair ecdhPair;
     public final String publicKeyB64;
+    public final String ecdhPublicKeyB64;
     public final String id;
 
     public TestKeys() throws Exception {
         KeyPairGenerator g = KeyPairGenerator.getInstance("EC");
         g.initialize(new ECGenParameterSpec("secp256r1"));
         pair = g.generateKeyPair();
+        ecdhPair = g.generateKeyPair();
         publicKeyB64 = Base64.encodeToString(
                 pair.getPublic().getEncoded(), Base64.NO_WRAP);
+        ecdhPublicKeyB64 = Base64.encodeToString(
+                ecdhPair.getPublic().getEncoded(), Base64.NO_WRAP);
         id = Ident.idFor(publicKeyB64);
     }
 

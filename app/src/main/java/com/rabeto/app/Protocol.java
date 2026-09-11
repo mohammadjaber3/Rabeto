@@ -13,7 +13,7 @@ import java.util.HashSet;
 import java.util.Set;
 
 /**
- * Rabeto wire protocol, version 6. All network input is untrusted.
+ * Rabeto wire protocol, version 7. All network input is untrusted.
  *
  * Changes from v5 (Phase A):
  *
@@ -36,7 +36,7 @@ import java.util.Set;
  */
 public final class Protocol {
 
-    public static final int VERSION = 6;
+    public static final int VERSION = 7;
 
     public static final int MAX_TTL = 8;
     public static final int MAX_HOPS = 16;
@@ -103,6 +103,7 @@ public final class Protocol {
             writeString(d, e.optString("name", ""));
             writeString(d, e.optString("av", ""));
             writeString(d, e.optString("pk", ""));
+            writeString(d, e.optString("epk", ""));
             writeString(d, e.optString("nonce", ""));
 
             d.flush();
@@ -134,6 +135,7 @@ public final class Protocol {
             writeString(out, e.optString("text", ""));
             writeString(out, e.optString("data", ""));
             writeString(out, e.optString("pk", ""));
+            writeString(out, e.optString("epk", ""));
 
             out.flush();
 
@@ -154,7 +156,8 @@ public final class Protocol {
                 + e.optString("from") + "|" + e.optString("to") + "|"
                 + e.optString("kind") + "|" + e.optLong("ts") + "|"
                 + e.optInt("enc") + "|" + e.optString("nonce") + "|"
-                + e.optString("pk");
+                + e.optString("pk") + "|"
+                + e.optString("epk");
     }
 
     /**
@@ -170,6 +173,7 @@ public final class Protocol {
         String to = e.optString("to", "");
         String kind = e.optString("kind", "");
         String pk = e.optString("pk", "");
+        String epk = e.optString("epk", "");
         String sig = e.optString("sig", "");
         String nonce = e.optString("nonce", "");
 
@@ -178,6 +182,7 @@ public final class Protocol {
                 || !(BROADCAST.equals(to) || bounded(to, 1, MAX_ID_CHARS))
                 || !bounded(kind, 1, MAX_KIND_CHARS)
                 || !bounded(pk, 1, MAX_PUBLIC_KEY_CHARS)
+                || (!BROADCAST.equals(to) && !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS))
                 || !bounded(sig, 1, MAX_SIGNATURE_CHARS)
                 || !bounded(nonce, 8, MAX_NONCE_CHARS)) {
             return false;
@@ -243,12 +248,14 @@ public final class Protocol {
         String id = o.optString("id", "");
         String name = o.optString("name", "");
         String pk = o.optString("pk", "");
+        String epk = o.optString("epk", "");
         String sig = o.optString("sig", "");
         String nonce = o.optString("nonce", "");
 
         if (!bounded(id, 1, MAX_ID_CHARS)
                 || !bounded(name, 1, MAX_NAME_CHARS)
                 || !bounded(pk, 1, MAX_PUBLIC_KEY_CHARS)
+                || !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS)
                 || !bounded(sig, 1, MAX_SIGNATURE_CHARS)
                 || !bounded(nonce, 8, MAX_NONCE_CHARS)
                 || o.optString("av", "").length() > MAX_DATA_CHARS) {

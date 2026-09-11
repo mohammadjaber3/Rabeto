@@ -585,7 +585,8 @@ function doSend(){
   if(!text || !S.openPeer) return;
   var id = S.openPeer==="*" ? N.broadcast(text) : N.send(S.openPeer,text);
   if(!id){
-    toast("ارسال نشد: کلید امن این مخاطب هنوز شناخته نشده است.");
+    if(S.openPeer==="*") toast("ارسال Broadcast انجام نشد. وضعیت هویت و اتصال دستگاه را بررسی کنید.");
+    else toast("ارسال نشد: هنوز کلید امن این مخاطب دریافت نشده یا نشست امن آماده نیست.");
     return;
   }
   input.value=""; input.style.height="auto"; sendBtn.disabled=true;

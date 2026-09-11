@@ -44,6 +44,7 @@ public class ProtocolTest {
         e.put("text", text);
         e.put("data", "");
         e.put("pk", alice.publicKeyB64);
+        e.put("epk", alice.ecdhPublicKeyB64);
         e.put("ttl", Protocol.MAX_TTL);
         e.put("hops", 0);
         e.put("sig", alice.sign(Protocol.canonicalMessage(e)));
@@ -56,6 +57,13 @@ public class ProtocolTest {
         assertTrue(Protocol.validEnvelope(e, now));
         assertTrue(Ident.verify(alice.publicKeyB64,
                 Protocol.canonicalMessage(e), e.getString("sig")));
+    }
+
+    @Test
+    public void rejectsDirectMessageWithoutEcdhKey() throws Exception {
+        JSONObject e = envelope(bob.id, 1, "sealed-blob");
+        e.remove("epk");
+        assertFalse(Protocol.validEnvelope(e, now));
     }
 
     @Test

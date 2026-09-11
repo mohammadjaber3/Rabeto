@@ -71,6 +71,7 @@ public final class RabetoCore implements TransportEvents {
     private final Map<String, String> linkPeers = new LinkedHashMap<String, String>();
 
     private final Map<String, String> pubKeys = new HashMap<String, String>();
+    private final Map<String, String> ecdhPubKeys = new HashMap<String, String>();
     private final Map<String, String> names = new HashMap<String, String>();
     private final Map<String, String> avatars = new HashMap<String, String>();
 
@@ -217,7 +218,7 @@ public final class RabetoCore implements TransportEvents {
 
     private void sendHello(String linkId) {
         try {
-            if (!ident.ok()) return;
+            if (!ident.ok() || !ident.ecdhOk()) return;
 
             JSONObject o = new JSONObject();
             o.put("t", "hello");
@@ -226,6 +227,7 @@ public final class RabetoCore implements TransportEvents {
             o.put("name", myName);
             o.put("av", myAvatar);
             o.put("pk", ident.pubKey());
+            o.put("epk", ident.ecdhPubKey());
             o.put("nonce", Protocol.newNonce());
             o.put("sig", ident.sign(Protocol.canonicalHello(o)));
 
@@ -242,6 +244,7 @@ public final class RabetoCore implements TransportEvents {
         String uid = o.optString("id", "");
         String nm = o.optString("name", uid);
         String pk = o.optString("pk", "");
+        String epk = o.optString("epk", "");
         String sig = o.optString("sig", "");
 
         if (uid.length() == 0 || uid.equals(myId)) return;
@@ -249,7 +252,7 @@ public final class RabetoCore implements TransportEvents {
         // Authenticate the announcement before trusting or persisting anything.
         if (!Ident.verify(pk, Protocol.canonicalHello(o), sig)) return;
 
-        int keyState = learnKey(uid, pk);
+        int keyState = learnKey(uid, pk, epk);
         if (keyState == -1) return;
 
         if (keyState == -2) {
@@ -258,7 +261,7 @@ public final class RabetoCore implements TransportEvents {
             return;
         }
 
-        if (keyState != 1 || !sessions.establish(uid, pk)) return;
+        if (keyState != 1 || !sessions.establish(uid, epk)) return;
 
         synchronized (this) {
             names.put(uid, nm);
@@ -283,16 +286,18 @@ public final class RabetoCore implements TransportEvents {
      *
      * @return 1 known/learned, 0 empty, -1 forged id, -2 key changed
      */
-    private int learnKey(String uid, String pk) {
-        if (pk == null || pk.length() == 0) return 0;
+    private int learnKey(String uid, String pk, String epk) {
+        if (pk == null || pk.length() == 0 || epk == null || epk.length() == 0) return 0;
         if (!uid.equals(Ident.idFor(pk))) return -1;
         synchronized (this) {
-            String had = pubKeys.get(uid);
-            if (had == null) {
+            String hadPk = pubKeys.get(uid);
+            String hadEpk = ecdhPubKeys.get(uid);
+            if (hadPk == null || hadEpk == null) {
                 pubKeys.put(uid, pk);
+                ecdhPubKeys.put(uid, epk);
                 return 1;
             }
-            if (!had.equals(pk)) return -2;
+            if (!hadPk.equals(pk) || !hadEpk.equals(epk)) return -2;
         }
         return 1;
     }
@@ -307,6 +312,7 @@ public final class RabetoCore implements TransportEvents {
         String mid = env.optString("id", "");
         String from = env.optString("from", "");
         String pk = env.optString("pk", "");
+        String epk = env.optString("epk", "");
 
         if (seen.seen(mid)) return;
 
@@ -322,14 +328,18 @@ public final class RabetoCore implements TransportEvents {
             return;
         }
 
-        int keyState = learnKey(from, pk);
+        int keyState = Protocol.BROADCAST.equals(env.optString("to", ""))
+                ? learnBroadcastKey(from, pk)
+                : learnKey(from, pk, epk);
         if (keyState == -1) return;
         if (keyState == -2) {
             sessions.remove(from);
             emitSecurity("identity_changed", from);
             return;
         }
-        if (keyState != 1 || !sessions.establish(from, pk)) return;
+        if (keyState != 1) return;
+        if (!Protocol.BROADCAST.equals(env.optString("to", ""))
+                && !sessions.establish(from, epk)) return;
 
         // Only authenticated traffic enters replay state or the relay cache.
         if (!seen.remember(mid)) return;
@@ -440,6 +450,19 @@ public final class RabetoCore implements TransportEvents {
                 });
     }
 
+    /** Broadcasts authenticate the signing identity but do not require ECDH. */
+    private int learnBroadcastKey(String uid, String pk) {
+        if (pk == null || pk.length() == 0 || !uid.equals(Ident.idFor(pk))) return -1;
+        synchronized (this) {
+            String had = pubKeys.get(uid);
+            if (had == null) {
+                pubKeys.put(uid, pk);
+                return 1;
+            }
+            return had.equals(pk) ? 1 : -2;
+        }
+    }
+
     // ------------------------------------------------------------------- outbound
 
     /**
@@ -534,16 +557,17 @@ public final class RabetoCore implements TransportEvents {
         e.put("text", body);
         e.put("data", "");
         e.put("pk", ident.pubKey());
+        e.put("epk", Protocol.BROADCAST.equals(to) ? "" : ident.ecdhPubKey());
         e.put("ttl", Protocol.MAX_TTL);
         e.put("hops", 0);
 
         if (encrypt && !Protocol.BROADCAST.equals(to)) {
-            String theirPk;
+            String theirEpk;
             synchronized (this) {
-                theirPk = pubKeys.get(to);
+                theirEpk = ecdhPubKeys.get(to);
             }
-            if (theirPk == null || theirPk.length() == 0) return null;
-            if (!sessions.has(to) && !sessions.establish(to, theirPk)) return null;
+            if (theirEpk == null || theirEpk.length() == 0) return null;
+            if (!sessions.has(to) && !sessions.establish(to, theirEpk)) return null;
 
             e.put("enc", 1);
             String aad = Protocol.aad(e);
@@ -744,7 +768,7 @@ public final class RabetoCore implements TransportEvents {
         }
 
         synchronized (this) {
-            if (!pubKeys.containsKey(to)) return; // still waiting for the key
+            if (!pubKeys.containsKey(to) || !ecdhPubKeys.containsKey(to)) return; // still waiting for the keys
         }
 
         final String draftId = row.messageId;
@@ -770,6 +794,7 @@ public final class RabetoCore implements TransportEvents {
             o.put("avatar", myAvatar);
             o.put("code", ident.ok() ? ident.code() : "");
             o.put("secure", ident.ok());
+            o.put("ecdh", ident.ecdhOk());
             o.put("protocol", Protocol.VERSION);
         } catch (Throwable ignored) {}
         return o;
@@ -815,7 +840,8 @@ public final class RabetoCore implements TransportEvents {
                     c.put("avatar", avatars.containsKey(e.getKey())
                             ? avatars.get(e.getKey()) : "");
                     c.put("online", peerLinks.containsKey(e.getKey()));
-                    c.put("keyed", pubKeys.containsKey(e.getKey()));
+                    c.put("keyed", pubKeys.containsKey(e.getKey())
+                            && ecdhPubKeys.containsKey(e.getKey()));
                     String pk = pubKeys.get(e.getKey());
                     c.put("code", pk == null ? "" : Ident.codeFor(pk));
                     out.put(c);
@@ -1059,6 +1085,8 @@ public final class RabetoCore implements TransportEvents {
 
             JSONObject keys = o.optJSONObject("pubKeys");
             if (keys != null) copyInto(keys, pubKeys);
+            JSONObject ekeys = o.optJSONObject("ecdhPubKeys");
+            if (ekeys != null) copyInto(ekeys, ecdhPubKeys);
 
             JSONObject nm = o.optJSONObject("names");
             if (nm != null) copyInto(nm, names);
@@ -1082,6 +1110,7 @@ public final class RabetoCore implements TransportEvents {
             JSONObject o = new JSONObject();
             synchronized (this) {
                 o.put("pubKeys", new JSONObject(new HashMap<String, String>(pubKeys)));
+                o.put("ecdhPubKeys", new JSONObject(new HashMap<String, String>(ecdhPubKeys)));
                 o.put("names", new JSONObject(new HashMap<String, String>(names)));
                 o.put("avatars", new JSONObject(new HashMap<String, String>(avatars)));
             }
