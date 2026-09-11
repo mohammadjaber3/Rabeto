@@ -177,13 +177,16 @@ public final class Protocol {
         String sig = e.optString("sig", "");
         String nonce = e.optString("nonce", "");
 
+        // A directed envelope must carry an ECDH key, because it must be
+        // encrypted. A broadcast may carry one so peers can learn it without a
+        // handshake, but it is optional: broadcast never depends on ECDH.
+        // Either way the field is length-bounded, since all input is untrusted.
         if (!bounded(id, 1, MAX_ID_CHARS)
                 || !bounded(from, 1, MAX_ID_CHARS)
                 || !(BROADCAST.equals(to) || bounded(to, 1, MAX_ID_CHARS))
                 || !bounded(kind, 1, MAX_KIND_CHARS)
                 || !bounded(pk, 1, MAX_PUBLIC_KEY_CHARS)
-                || (!BROADCAST.equals(to)
-                    && !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS))
+                || !bounded(epk, BROADCAST.equals(to) ? 0 : 1, MAX_PUBLIC_KEY_CHARS)
                 || !bounded(sig, 1, MAX_SIGNATURE_CHARS)
                 || !bounded(nonce, 8, MAX_NONCE_CHARS)) {
             return false;
@@ -253,10 +256,14 @@ public final class Protocol {
         String sig = o.optString("sig", "");
         String nonce = o.optString("nonce", "");
 
+        // epk is OPTIONAL here. A device whose ECDH key is unavailable must
+        // still be able to announce its signing identity, otherwise it cannot
+        // be seen, cannot relay, and cannot receive broadcasts. It simply
+        // cannot open a private session until it advertises an ECDH key.
         if (!bounded(id, 1, MAX_ID_CHARS)
                 || !bounded(name, 1, MAX_NAME_CHARS)
                 || !bounded(pk, 1, MAX_PUBLIC_KEY_CHARS)
-                || !bounded(epk, 1, MAX_PUBLIC_KEY_CHARS)
+                || !bounded(epk, 0, MAX_PUBLIC_KEY_CHARS)
                 || !bounded(sig, 1, MAX_SIGNATURE_CHARS)
                 || !bounded(nonce, 8, MAX_NONCE_CHARS)
                 || o.optString("av", "").length() > MAX_DATA_CHARS) {

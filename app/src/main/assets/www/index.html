@@ -437,6 +437,9 @@ function renderSettings(){
       +'<div class="sw" id="fastSw"><i></i></div></div></div>'
 
    +'<div class="card"><h3>درباره</h3>'
+    +'<div class="item"><div class="grow"><div class="lbl">رمزنگاری خصوصی</div>'
+      +'<div class="hint">'+(S.me.ecdh?"آماده":"در دسترس نیست")
+        +(S.me.ecdhDetail?" · "+esc(S.me.ecdhDetail):"")+'</div></div></div>'
     +'<div class="item"><div class="grow"><div class="lbl">پروتکل رابطو نسخه '+esc(S.me.protocol||"—")+'</div>'
       +'<div class="hint">این برنامه هیچ مجوز اینترنتی ندارد. حتی اگر بخواهد، نمی‌تواند چیزی به بیرون بفرستد.</div>'
       +'</div></div></div>';
@@ -457,7 +460,10 @@ window.RabetoEvent = function(type,payload){
       for(var i=0;i<S.status.peers.length;i++){
         var p=S.status.peers[i];
         online[p.id]=true;
-        if(!S.contacts[p.id]) S.contacts[p.id]={id:p.id,name:p.name,keyed:true};
+        /* Online is not the same as key-exchanged. The authoritative value
+           arrives on the contacts event; claiming true here is a lie that
+           hides a stuck private session. */
+        if(!S.contacts[p.id]) S.contacts[p.id]={id:p.id,name:p.name,keyed:false};
         S.contacts[p.id].name=p.name||S.contacts[p.id].name;
       }
       for(var id in S.contacts) S.contacts[id].online=!!online[id];
@@ -489,11 +495,19 @@ window.RabetoEvent = function(type,payload){
       render();
     }
     else if(type==="security"){
-      var why = payload.reason==="identity_changed"
-        ? "کلید امنیتی "+(payload.name||payload.peer)+" عوض شده. تا تأیید حضوری به او پیام ندهید."
-        : payload.reason==="session_stale"
-          ? "نشست امن با "+(payload.name||payload.peer)+" بازسازی می‌شود."
-          : "هویت امن این دستگاه در دسترس نیست.";
+      var who = payload.name||payload.peer;
+      var why;
+      if(payload.reason==="identity_changed")
+        why = "کلید امنیتی "+who+" عوض شده. تا تأیید حضوری به او پیام ندهید.";
+      else if(payload.reason==="session_stale")
+        why = "نشست امن با "+who+" بازسازی می‌شود.";
+      else if(payload.reason==="peer_ecdh_missing")
+        why = who+" هنوز کلید رمزنگاری خود را اعلام نکرده. پیام همگانی کار می‌کند، پیام خصوصی بعد از تبادل کلید ارسال می‌شود.";
+      else if(payload.reason==="session_unavailable")
+        why = "نشست امن با "+who+" ساخته نشد. وضعیت رمزنگاری این دستگاه را در تنظیمات ببینید.";
+      else if(payload.reason==="identity_unavailable")
+        why = "هویت امن این دستگاه در دسترس نیست.";
+      else why = "وضعیت امنیتی تغییر کرد.";
       toast(why);
     }
     else if(type==="draftSent"){ N.chats(200); }

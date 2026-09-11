@@ -48,6 +48,9 @@ public final class RabetoCore implements TransportEvents {
 
     private static final String TAG = "RabetoCore";
     private static final int SEEN_MAX = 4000;
+    /** Bounded hello retry: a lossy link self-heals, a crowded room does not flood. */
+    private static final int HELLO_MAX_ATTEMPTS = 5;
+    private static final long HELLO_RETRY_MS = 15_000L;
     private static final int RELAY_MAX_ROWS = 4000;
     private static final int FLUSH_BATCH = 120;
 
@@ -69,6 +72,11 @@ public final class RabetoCore implements TransportEvents {
     private final Map<String, String> peerLinks = new LinkedHashMap<String, String>();
     /** linkId -> authenticated peerId */
     private final Map<String, String> linkPeers = new LinkedHashMap<String, String>();
+    /** linkId -> {attempts, lastAttemptMs} for hello retry */
+    private final Map<String, long[]> helloState = new LinkedHashMap<String, long[]>();
+
+    private int helloSent = 0;
+    private int helloReceived = 0;
 
     private final Map<String, String> pubKeys = new HashMap<String, String>();
     private final Map<String, String> ecdhPubKeys = new HashMap<String, String>();
@@ -159,7 +167,41 @@ public final class RabetoCore implements TransportEvents {
         flushQueue(MessageStore.ROLE_OUTBOX, now);
         flushQueue(MessageStore.ROLE_RELAY, now);
 
+        retryHellos(now);
+
         emitStatus();
+    }
+
+    /**
+     * A link with no authenticated peer means our hello, or theirs, was lost.
+     * Nearby and BLE both drop packets, and the old code sent hello exactly
+     * once per link, so a single loss permanently prevented a private session.
+     *
+     * Retry is capped per link and stops. The test for any mesh decision is
+     * "what happens with 200 phones in one room", and an uncapped handshake
+     * retry is precisely how that room collapses.
+     */
+    private void retryHellos(long now) {
+        List<String> due = new ArrayList<String>();
+        synchronized (this) {
+            List<String> links = transports.links();
+            for (int i = 0; i < links.size(); i++) {
+                String linkId = links.get(i);
+                if (linkPeers.containsKey(linkId)) continue;
+
+                long[] st = helloState.get(linkId);
+                if (st == null) {
+                    st = new long[] { 0L, 0L };
+                    helloState.put(linkId, st);
+                }
+                if (st[0] >= HELLO_MAX_ATTEMPTS) continue;
+                if (now - st[1] < HELLO_RETRY_MS) continue;
+                st[0]++;
+                st[1] = now;
+                due.add(linkId);
+            }
+        }
+        for (int i = 0; i < due.size(); i++) sendHello(due.get(i));
     }
 
     // -------------------------------------------------------------- transport in
@@ -180,6 +222,7 @@ public final class RabetoCore implements TransportEvents {
             if (peer != null && linkId.equals(peerLinks.get(peer))) {
                 peerLinks.remove(peer);
             }
+            helloState.remove(linkId);
         }
         emitStatus();
     }
@@ -218,7 +261,11 @@ public final class RabetoCore implements TransportEvents {
 
     private void sendHello(String linkId) {
         try {
-            if (!ident.ok() || !ident.ecdhOk()) return;
+            // Signing identity is required. ECDH is not: a device that cannot
+            // do key agreement must still be discoverable, still relay, and
+            // still exchange broadcasts. It advertises an empty epk and simply
+            // cannot open a private session until that is fixed.
+            if (!ident.ok()) return;
 
             JSONObject o = new JSONObject();
             o.put("t", "hello");
@@ -227,14 +274,16 @@ public final class RabetoCore implements TransportEvents {
             o.put("name", myName);
             o.put("av", myAvatar);
             o.put("pk", ident.pubKey());
-            o.put("epk", ident.ecdhPubKey());
+            o.put("epk", ident.ecdhOk() ? ident.ecdhPubKey() : "");
             o.put("nonce", Protocol.newNonce());
             o.put("sig", ident.sign(Protocol.canonicalHello(o)));
 
             byte[] packet = o.toString().getBytes(StandardCharsets.UTF_8);
             if (!Protocol.validPacketSize(packet)) return;
 
-            transports.send(linkId, packet);
+            if (transports.send(linkId, packet)) {
+                synchronized (this) { helloSent++; }
+            }
         } catch (Throwable ignored) {}
     }
 
@@ -252,7 +301,12 @@ public final class RabetoCore implements TransportEvents {
         // Authenticate the announcement before trusting or persisting anything.
         if (!Ident.verify(pk, Protocol.canonicalHello(o), sig)) return;
 
-        int keyState = learnKey(uid, pk, epk);
+        synchronized (this) { helloReceived++; }
+
+        // The ECDH key is optional in a hello, so identity learning must
+        // tolerate its absence. learnKey() is the strict variant and stays
+        // reserved for directed traffic, which is always encrypted.
+        int keyState = learnIdentity(uid, pk, epk);
         if (keyState == -1) return;
 
         if (keyState == -2) {
@@ -260,10 +314,15 @@ public final class RabetoCore implements TransportEvents {
             emitSecurity("identity_changed", uid);
             return;
         }
+        if (keyState != 1) return;
 
-        if (keyState != 1 || !sessions.establish(uid, epk)) return;
-
+        // The signature already proved this identity, so recording it is safe
+        // even if no secure session can be built. Discarding an authenticated
+        // peer just because ECDH failed is what made the peer invisible and
+        // stopped relaying and store-and-forward from working at all.
+        boolean wasKnown;
         synchronized (this) {
+            wasKnown = uid.equals(linkPeers.get(linkId));
             names.put(uid, nm);
             String av = o.optString("av", "");
             if (av.length() > 0) avatars.put(uid, av);
@@ -271,12 +330,24 @@ public final class RabetoCore implements TransportEvents {
             linkPeers.put(linkId, uid);
         }
 
+        boolean secure = epk.length() > 0 && sessions.establish(uid, epk);
+        if (!secure) {
+            // Broadcast and relay still work. Only private messaging waits.
+            emitSecurity(epk.length() == 0
+                    ? "peer_ecdh_missing" : "session_unavailable", uid);
+        }
+
+        // Answer an announcement from a peer we had not authenticated on this
+        // link yet, so a one-way packet loss heals without waiting for a
+        // reconnect. Gating on wasKnown is what stops the two sides from
+        // answering each other forever: the exchange settles in three packets.
+        if (!wasKnown) sendHello(linkId);
+
         saveState();
         emitStatus();
         emitContacts();
 
-        // Authenticated and keyed. Only now is it safe to hand this peer our
-        // queued traffic.
+        // Authenticated. Hand over whatever we are carrying for this link.
         flushToLink(linkId);
     }
 
@@ -329,7 +400,7 @@ public final class RabetoCore implements TransportEvents {
         }
 
         int keyState = Protocol.BROADCAST.equals(env.optString("to", ""))
-                ? learnBroadcastKey(from, pk, epk)
+                ? learnIdentity(from, pk, epk)
                 : learnKey(from, pk, epk);
         if (keyState == -1) return;
         if (keyState == -2) {
@@ -451,15 +522,15 @@ public final class RabetoCore implements TransportEvents {
     }
 
     /**
-     * Broadcasts authenticate the signing identity.
+     * Learn an identity whose ECDH key is optional: broadcasts and hellos.
      *
-     * Broadcast is intentionally independent from ECDH so an ECDH problem
-     * on an older Android release cannot break public messaging.
-     *
-     * A valid ECDH key is still learned when present, so later private
-     * sessions can use it.
+     * The signing key is pinned on first use and a later change is a loud
+     * warning. The ECDH key is learned when present and pinned from then on.
+     * A missing ECDH key is never an error here, which is what keeps broadcast
+     * independent from ECDH (see commit c72d0ef) while still letting peers
+     * discover each other's ECDH keys without a surviving handshake.
      */
-    private int learnBroadcastKey(String uid, String pk, String epk) {
+    private int learnIdentity(String uid, String pk, String epk) {
         if (pk == null || pk.length() == 0
                 || !uid.equals(Ident.idFor(pk))) {
             return -1;
@@ -586,7 +657,10 @@ public final class RabetoCore implements TransportEvents {
         e.put("text", body);
         e.put("data", "");
         e.put("pk", ident.pubKey());
-        e.put("epk", Protocol.BROADCAST.equals(to) ? "" : ident.ecdhPubKey());
+        // Broadcasts now advertise our ECDH key so peers can learn it without
+        // a surviving handshake. When we have no ECDH key this is empty and
+        // the broadcast is unaffected: broadcast never depends on ECDH.
+        e.put("epk", ident.ecdhOk() ? ident.ecdhPubKey() : "");
         e.put("ttl", Protocol.MAX_TTL);
         e.put("hops", 0);
 
@@ -824,6 +898,9 @@ public final class RabetoCore implements TransportEvents {
             o.put("code", ident.ok() ? ident.code() : "");
             o.put("secure", ident.ok());
             o.put("ecdh", ident.ecdhOk());
+            // Diagnostic only: backing store, or stage:ExceptionType on failure.
+            // Never key material.
+            o.put("ecdhDetail", ident.ecdhDetail());
             o.put("protocol", Protocol.VERSION);
         } catch (Throwable ignored) {}
         return o;
@@ -853,6 +930,12 @@ public final class RabetoCore implements TransportEvents {
             o.put("transports", new JSONArray(transports.runningTransports()));
             o.put("sessions", sessions.size());
             o.put("seen", seen.size());
+            synchronized (this) {
+                o.put("helloSent", helloSent);
+                o.put("helloReceived", helloReceived);
+                o.put("knownKeys", pubKeys.size());
+                o.put("knownEcdhKeys", ecdhPubKeys.size());
+            }
         } catch (Throwable ignored) {}
         return o;
     }
@@ -1110,7 +1193,10 @@ public final class RabetoCore implements TransportEvents {
      */
     private void loadState() {
         try {
-            JSONObject o = new JSONObject(prefs.getString("state", "{}"));
+            // Namespaced on purpose. Keys pinned while ECDH was broken would be
+            // read as an identity change by trust-on-first-use and would keep
+            // private messaging blocked after the fix. Room history is untouched.
+            JSONObject o = new JSONObject(prefs.getString("state_v3", "{}"));
 
             JSONObject keys = o.optJSONObject("pubKeys");
             if (keys != null) copyInto(keys, pubKeys);
@@ -1143,7 +1229,7 @@ public final class RabetoCore implements TransportEvents {
                 o.put("names", new JSONObject(new HashMap<String, String>(names)));
                 o.put("avatars", new JSONObject(new HashMap<String, String>(avatars)));
             }
-            prefs.edit().putString("state", o.toString()).apply();
+            prefs.edit().putString("state_v3", o.toString()).apply();
         } catch (Throwable ignored) {}
     }
 }

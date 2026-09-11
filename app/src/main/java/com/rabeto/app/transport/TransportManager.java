@@ -10,6 +10,8 @@ import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
 
+import androidx.core.content.ContextCompat;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -88,7 +90,11 @@ public final class TransportManager implements TransportEvents {
             f.addAction(BluetoothAdapter.ACTION_STATE_CHANGED);
             f.addAction(WifiManager.WIFI_STATE_CHANGED_ACTION);
             try {
-                ctx.registerReceiver(radioReceiver, f);
+                // Android 14+ wants an explicit export flag. These are protected
+                // system broadcasts, so NOT_EXPORTED is correct and they are
+                // still delivered. ContextCompat covers older releases.
+                ContextCompat.registerReceiver(ctx, radioReceiver, f,
+                        ContextCompat.RECEIVER_NOT_EXPORTED);
                 receiverRegistered = true;
             } catch (Throwable t) {
                 Log.w(TAG, "radio receiver: " + t.getMessage());

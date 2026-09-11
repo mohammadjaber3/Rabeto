@@ -191,4 +191,90 @@ public class ProtocolTest {
         assertFalse(Protocol.validPacketSize(new byte[0]));
         assertFalse(Protocol.validPacketSize(null));
     }
+
+    // ------------------------------------------------------- key discovery rules
+    // Phase A: an ECDH key may ride along on a broadcast so peers can learn it
+    // without a surviving handshake, and it is optional everywhere it is not
+    // required for encryption. Broadcast must never depend on it: that
+    // dependency is exactly what commit cb06858 broke and c72d0ef repaired.
+
+    private JSONObject hello(TestKeys who, String epk) throws Exception {
+        JSONObject o = new JSONObject();
+        o.put("t", "hello");
+        o.put("v", Protocol.VERSION);
+        o.put("id", who.id);
+        o.put("name", "tester");
+        o.put("av", "");
+        o.put("pk", who.publicKeyB64);
+        o.put("epk", epk);
+        o.put("nonce", Protocol.newNonce());
+        o.put("sig", who.sign(Protocol.canonicalHello(o)));
+        return o;
+    }
+
+    @Test
+    public void keyDiscoveryRules_helloIsValidWithEcdhKey() throws Exception {
+        JSONObject o = hello(alice, alice.ecdhPublicKeyB64);
+        assertTrue(Protocol.validHello(o));
+        assertTrue(Ident.verify(alice.publicKeyB64,
+                Protocol.canonicalHello(o), o.getString("sig")));
+    }
+
+    @Test
+    public void keyDiscoveryRules_helloIsValidWithoutEcdhKey() throws Exception {
+        // A device whose key agreement is unavailable must still be able to
+        // announce itself, otherwise it cannot be seen, cannot relay, and
+        // cannot take part in broadcast at all.
+        JSONObject o = hello(alice, "");
+        assertTrue(Protocol.validHello(o));
+    }
+
+    @Test
+    public void keyDiscoveryRules_helloRejectsOversizeEcdhKey() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < Protocol.MAX_PUBLIC_KEY_CHARS + 1; i++) sb.append('A');
+        assertFalse(Protocol.validHello(hello(alice, sb.toString())));
+    }
+
+    @Test
+    public void keyDiscoveryRules_helloRejectsForgedIdentity() throws Exception {
+        JSONObject o = hello(alice, alice.ecdhPublicKeyB64);
+        o.put("id", bob.id);
+        assertFalse(Protocol.validHello(o));
+    }
+
+    @Test
+    public void keyDiscoveryRules_broadcastMayCarryAnEcdhKey() throws Exception {
+        JSONObject e = envelope(Protocol.BROADCAST, 0, "hello everyone");
+        assertTrue(e.getString("epk").length() > 0);
+        assertTrue(Protocol.validEnvelope(e, now));
+    }
+
+    @Test
+    public void keyDiscoveryRules_broadcastWorksWithoutAnEcdhKey() throws Exception {
+        // The cb06858 regression, guarded from the other side.
+        JSONObject e = envelope(Protocol.BROADCAST, 0, "hello everyone");
+        e.put("epk", "");
+        e.put("sig", alice.sign(Protocol.canonicalMessage(e)));
+        assertTrue(Protocol.validEnvelope(e, now));
+        assertTrue(Ident.verify(alice.publicKeyB64,
+                Protocol.canonicalMessage(e), e.getString("sig")));
+    }
+
+    @Test
+    public void keyDiscoveryRules_broadcastRejectsOversizeEcdhKey() throws Exception {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < Protocol.MAX_PUBLIC_KEY_CHARS + 1; i++) sb.append('A');
+        JSONObject e = envelope(Protocol.BROADCAST, 0, "x");
+        e.put("epk", sb.toString());
+        e.put("sig", alice.sign(Protocol.canonicalMessage(e)));
+        assertFalse(Protocol.validEnvelope(e, now));
+    }
+
+    @Test
+    public void keyDiscoveryRules_directMessageStillRequiresEncryption() throws Exception {
+        // Nothing above may be read as permission to send a private message
+        // in the clear.
+        assertFalse(Protocol.validEnvelope(envelope(bob.id, 0, "clear"), now));
+    }
 }
