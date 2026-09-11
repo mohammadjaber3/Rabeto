@@ -86,6 +86,12 @@ public class Ident {
             ok = id.length() > 0;
 
         } catch (Throwable t) {
+            android.util.Log.e(
+                    "RabetoIdent",
+                    "Identity initialization failed",
+                    t
+            );
+
             ok = false;
             priv = null;
             pub = null;
