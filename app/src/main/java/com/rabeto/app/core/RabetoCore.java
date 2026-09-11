@@ -451,14 +451,16 @@ public final class RabetoCore implements TransportEvents {
     }
 
     /**
-     * Broadcasts authenticate the signing identity and distribute the
-     * public ECDH key needed for later private-message sessions.
+     * Broadcasts authenticate the signing identity.
      *
-     * Both keys are public and the envelope signature binds them together.
+     * Broadcast is intentionally independent from ECDH so an ECDH problem
+     * on an older Android release cannot break public messaging.
+     *
+     * A valid ECDH key is still learned when present, so later private
+     * sessions can use it.
      */
     private int learnBroadcastKey(String uid, String pk, String epk) {
         if (pk == null || pk.length() == 0
-                || epk == null || epk.length() == 0
                 || !uid.equals(Ident.idFor(pk))) {
             return -1;
         }
@@ -467,13 +469,23 @@ public final class RabetoCore implements TransportEvents {
             String hadPk = pubKeys.get(uid);
             String hadEpk = ecdhPubKeys.get(uid);
 
-            if (hadPk == null || hadEpk == null) {
+            if (hadPk == null) {
                 pubKeys.put(uid, pk);
-                ecdhPubKeys.put(uid, epk);
+                if (epk != null && epk.length() > 0) {
+                    ecdhPubKeys.put(uid, epk);
+                }
                 return 1;
             }
 
-            if (!hadPk.equals(pk) || !hadEpk.equals(epk)) return -2;
+            if (!hadPk.equals(pk)) return -2;
+
+            if (epk != null && epk.length() > 0) {
+                if (hadEpk == null) {
+                    ecdhPubKeys.put(uid, epk);
+                } else if (!hadEpk.equals(epk)) {
+                    return -2;
+                }
+            }
         }
 
         return 1;
@@ -574,7 +586,7 @@ public final class RabetoCore implements TransportEvents {
         e.put("text", body);
         e.put("data", "");
         e.put("pk", ident.pubKey());
-        e.put("epk", ident.ecdhPubKey());
+        e.put("epk", Protocol.BROADCAST.equals(to) ? "" : ident.ecdhPubKey());
         e.put("ttl", Protocol.MAX_TTL);
         e.put("hops", 0);
 
