@@ -4,8 +4,8 @@ plugins {
 
 def ksFile = file('rabeto.jks')
 
-def rabetoVersionName = System.getenv("RABETO_VERSION_NAME") ?: "0.1.0-debug"
-def rabetoVersionCode = System.getenv("RABETO_VERSION_CODE") ?: "1"
+def rabetoVersionName = System.getenv("RABETO_VERSION_NAME") ?: "0.2.0-alpha"
+def rabetoVersionCode = System.getenv("RABETO_VERSION_CODE") ?: "2"
 
 android {
     namespace 'com.rabeto.app'
@@ -14,9 +14,16 @@ android {
     defaultConfig {
         applicationId "com.rabeto.app"
         minSdk 24
-        targetSdk 34
+        targetSdk 35
         versionCode Integer.parseInt(rabetoVersionCode)
         versionName rabetoVersionName
+
+        // Room exports the schema so migrations can be reviewed in git.
+        javaCompileOptions {
+            annotationProcessorOptions {
+                arguments += ["room.schemaLocation": "$projectDir/schemas".toString()]
+            }
+        }
     }
 
     if (ksFile.exists()) {
@@ -32,15 +39,38 @@ android {
 
     buildTypes {
         release {
-            minifyEnabled false
-            shrinkResources false
+            // Phase A hardening: R8 + resource shrinking are now ON.
+            minifyEnabled true
+            shrinkResources true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
             signingConfig ksFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+        debug {
+            minifyEnabled false
         }
     }
 
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
+    }
+
+    testOptions {
+        unitTests {
+            includeAndroidResources = true
+            returnDefaultValues = false
+        }
+    }
+
+    packagingOptions {
+        // Narrow on purpose: excluding all of META-INF can strip service loader
+        // entries that libraries depend on at runtime.
+        resources.excludes += [
+                'META-INF/LICENSE*',
+                'META-INF/NOTICE*',
+                'META-INF/DEPENDENCIES',
+                'META-INF/*.kotlin_module'
+        ]
     }
 }
 
@@ -50,4 +80,12 @@ dependencies {
 
     implementation 'androidx.room:room-runtime:2.8.5'
     annotationProcessor 'androidx.room:room-compiler:2.8.5'
+
+    // Phase A: real test infrastructure.
+    // Intentionally NO Robolectric: it downloads an android-all jar from Maven on
+    // first run, which breaks the suite on a device with no connectivity. Tests
+    // shadow android.util.Base64 in the test source set instead, so the whole
+    // suite runs on a plain JVM, offline, in about a second.
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

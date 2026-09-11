@@ -21,7 +21,23 @@ public class StoredMessage {
     public String messageId;
     public String senderId;
     public String recipientId;
+
+    /**
+     * The exact wire envelope. For inbox and outbox rows this stays ciphertext,
+     * so a retransmission is byte-identical and the signature still verifies.
+     */
     public String envelopeJson;
+
+    /**
+     * Schema v2. Local-only readable copy of the message body.
+     *
+     * Why a separate column instead of decrypting history on demand: once
+     * Phase B introduces forward secrecy, the session key that decrypted this
+     * message is deliberately destroyed. Anything not stored in readable form
+     * at receive time is gone forever. Relay rows keep this null: we carry other
+     * people's traffic, we never read it.
+     */
+    public String plainText;
 
     public long createdAt;
     public long expiresAt;
@@ -52,6 +68,7 @@ public class StoredMessage {
         this.role = role;
         this.status = status;
 
+        this.plainText = null;
         this.attempts = 0;
         this.lastAttemptAt = 0L;
         this.nextAttemptAt = 0L;

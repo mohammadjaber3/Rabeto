@@ -1,53 +1,85 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android"><!-- وای‌فای: برای پیدا کردن و اتصال سریع (بدون نیاز به اینترنت) -->
-<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
-<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
-<uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
-    android:usesPermissionFlags="neverForLocation" />
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-<!-- بلوتوث: برای پیدا کردن دستگاه‌ها و ارتباط پشتیبان -->
-<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+    <!-- Wi-Fi: peer discovery and Wi-Fi Direct upgrade (no internet permission on purpose). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+    <uses-permission
+        android:name="android.permission.NEARBY_WIFI_DEVICES"
+        android:usesPermissionFlags="neverForLocation" />
 
-<!-- اندروید ۱۱ و پایین‌تر: جست‌وجوی بلوتوث/وای‌فای به مجوز مکان گره خورده است -->
-<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="31" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="31" />
+    <!-- Bluetooth: discovery, advertising and GATT links. -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <uses-permission
+        android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation" />
 
-<uses-permission android:name="android.permission.VIBRATE" />
-<uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Android 11 and below still gate BT/Wi-Fi scanning behind location. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" android:maxSdkVersion="31" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="31" />
 
-<application
-    android:allowBackup="false"
-    android:icon="@drawable/ic_launcher"
-    android:label="@string/app_name"
-    android:hardwareAccelerated="true"
-    android:supportsRtl="true">
+    <!-- Phase A: the mesh now survives the UI. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
-    <activity
-        android:name=".MainActivity"
-        android:exported="true"
-        android:configChanges="orientation|screenSize|keyboardHidden"
-        android:screenOrientation="portrait"
-        android:windowSoftInputMode="adjustResize"
-        android:theme="@android:style/Theme.Material.NoActionBar">
-        <intent-filter>
-            <action android:name="android.intent.action.MAIN" />
-            <category android:name="android.intent.category.LAUNCHER" />
-        </intent-filter>
-    </activity>
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <!-- برای فرستادن فایل نصبی خودِ اپ به گوشی بغلی -->
-    <provider
-        android:name="androidx.core.content.FileProvider"
-        android:authorities="${applicationId}.files"
-        android:exported="false"
-        android:grantUriPermissions="true">
-        <meta-data
-            android:name="android.support.FILE_PROVIDER_PATHS"
-            android:resource="@xml/file_paths" />
-    </provider>
-</application>
+    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:icon="@drawable/ic_launcher"
+        android:label="@string/app_name"
+        android:hardwareAccelerated="true"
+        android:supportsRtl="true">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|uiMode"
+            android:windowSoftInputMode="adjustResize"
+            android:theme="@android:style/Theme.Material.NoActionBar">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!--
+            The mesh engine. This is the single most important change in Phase A:
+            discovery, relaying and store-and-forward no longer die with the Activity.
+        -->
+        <service
+            android:name=".service.RabetoService"
+            android:exported="false"
+            android:stopWithTask="false"
+            android:foregroundServiceType="connectedDevice" />
+
+        <receiver
+            android:name=".service.BootReceiver"
+            android:exported="true"
+            android:directBootAware="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
 </manifest>

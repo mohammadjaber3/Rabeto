@@ -1,4 +1,6 @@
-<?xml version="1.0" encoding="utf-8"?>
 <resources>
-<string name="app_name">رابطو</string>
+    <string name="app_name">رابطو</string>
+    <string name="service_channel">شبکه رابطو</string>
+    <string name="service_running">رابطو فعال است</string>
+    <string name="service_detail">در حال یافتن دستگاه‌های نزدیک</string>
 </resources>

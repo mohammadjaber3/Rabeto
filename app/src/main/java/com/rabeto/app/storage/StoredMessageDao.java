@@ -14,14 +14,14 @@ public interface StoredMessageDao {
     long insert(StoredMessage message);
 
     @Query("""
-        SELECT * FROM stored_messages
-        WHERE role = :role
-          AND expiresAt > :now
-          AND status IN (0, 1)
-          AND (nextAttemptAt = 0 OR nextAttemptAt <= :now)
-        ORDER BY createdAt ASC
-        LIMIT :limit
-        """)
+            SELECT * FROM stored_messages
+            WHERE role = :role
+              AND expiresAt > :now
+              AND status IN (0, 1)
+              AND (nextAttemptAt = 0 OR nextAttemptAt <= :now)
+            ORDER BY createdAt ASC
+            LIMIT :limit
+            """)
     List<StoredMessage> findActive(
             int role,
             long now,
@@ -29,43 +29,86 @@ public interface StoredMessageDao {
     );
 
     @Query("""
-        SELECT * FROM stored_messages
-        WHERE messageId = :messageId
-        ORDER BY role ASC
-        LIMIT 1
-        """)
+            SELECT * FROM stored_messages
+            WHERE messageId = :messageId
+            ORDER BY role ASC
+            LIMIT 1
+            """)
     StoredMessage findById(String messageId);
 
     @Query("""
-        SELECT * FROM stored_messages
-        WHERE messageId = :messageId
-          AND role = :role
-        LIMIT 1
-        """)
+            SELECT * FROM stored_messages
+            WHERE messageId = :messageId
+              AND role = :role
+            LIMIT 1
+            """)
     StoredMessage findByIdAndRole(
             String messageId,
             int role
     );
 
     @Query("""
-        SELECT * FROM stored_messages
-        WHERE role = 2
-          AND (senderId = :peerId OR recipientId = :peerId)
-        ORDER BY createdAt DESC
-        LIMIT :limit
-        """)
+            SELECT * FROM stored_messages
+            WHERE role = 2
+              AND (senderId = :peerId OR recipientId = :peerId)
+            ORDER BY createdAt DESC
+            LIMIT :limit
+            """)
     List<StoredMessage> findHistory(
             String peerId,
             int limit
     );
 
+    /**
+     * Phase A addition: a chat thread is both sides of the conversation.
+     * findHistory only returned role 2 (inbox), so the UI could never render
+     * the user's own sent messages. Query-only change, no schema migration.
+     */
     @Query("""
-        UPDATE stored_messages
-        SET status = :newStatus
-        WHERE messageId = :messageId
-          AND role = :role
-          AND status = :expectedStatus
-        """)
+            SELECT * FROM stored_messages
+            WHERE role IN (0, 2)
+              AND (senderId = :peerId OR recipientId = :peerId)
+            ORDER BY createdAt ASC
+            LIMIT :limit
+            """)
+    List<StoredMessage> findConversation(
+            String peerId,
+            int limit
+    );
+
+    /** Most recent message per peer, for the chat list. */
+    @Query("""
+            SELECT * FROM stored_messages
+            WHERE role IN (0, 2)
+            ORDER BY createdAt DESC
+            LIMIT :limit
+            """)
+    List<StoredMessage> findRecent(int limit);
+
+    @Query("""
+            SELECT COUNT(*) FROM stored_messages
+            WHERE role = 2
+              AND senderId = :peerId
+              AND status < 3
+            """)
+    int countUnread(String peerId);
+
+    @Query("""
+            UPDATE stored_messages
+            SET status = 3
+            WHERE role = 2
+              AND senderId = :peerId
+              AND status < 3
+            """)
+    int markThreadRead(String peerId);
+
+    @Query("""
+            UPDATE stored_messages
+            SET status = :newStatus
+            WHERE messageId = :messageId
+              AND role = :role
+              AND status = :expectedStatus
+            """)
     int transitionStatus(
             String messageId,
             int role,
@@ -74,15 +117,15 @@ public interface StoredMessageDao {
     );
 
     @Query("""
-        UPDATE stored_messages
-        SET attempts = attempts + 1,
-            lastAttemptAt = :now,
-            nextAttemptAt = :nextAttemptAt
-        WHERE messageId = :messageId
-          AND role = :role
-          AND status IN (0, 1)
-          AND expiresAt > :now
-        """)
+            UPDATE stored_messages
+            SET attempts = attempts + 1,
+                lastAttemptAt = :now,
+                nextAttemptAt = :nextAttemptAt
+            WHERE messageId = :messageId
+              AND role = :role
+              AND status IN (0, 1)
+              AND expiresAt > :now
+            """)
     int recordAttempt(
             String messageId,
             int role,
@@ -91,42 +134,58 @@ public interface StoredMessageDao {
     );
 
     @Query("""
-        UPDATE stored_messages
-        SET status = 4
-        WHERE expiresAt <= :now
-          AND status IN (0, 1)
-        """)
+            UPDATE stored_messages
+            SET status = 4
+            WHERE expiresAt <= :now
+              AND status IN (0, 1)
+            """)
     int markExpired(long now);
 
     @Query("""
-        DELETE FROM stored_messages
-        WHERE role = 1
-          AND expiresAt <= :now
-        """)
+            DELETE FROM stored_messages
+            WHERE role = 1
+              AND expiresAt <= :now
+            """)
     int deleteExpiredRelay(long now);
 
+    /** Relay cache ceiling: oldest relay rows go first when we are over budget. */
     @Query("""
-        DELETE FROM stored_messages
-        WHERE messageId = :messageId
-        """)
+            DELETE FROM stored_messages
+            WHERE role = 1
+              AND messageId IN (
+                SELECT messageId FROM stored_messages
+                WHERE role = 1
+                ORDER BY createdAt ASC
+                LIMIT :count
+              )
+            """)
+    int trimOldestRelay(int count);
+
+    @Query("SELECT COUNT(*) FROM stored_messages WHERE role = 1")
+    int countRelay();
+
+    @Query("""
+            DELETE FROM stored_messages
+            WHERE messageId = :messageId
+            """)
     int deleteById(String messageId);
 
     @Query("""
-        DELETE FROM stored_messages
-        WHERE messageId = :messageId
-          AND role = :role
-        """)
+            DELETE FROM stored_messages
+            WHERE messageId = :messageId
+              AND role = :role
+            """)
     int deleteByIdAndRole(
             String messageId,
             int role
     );
 
     @Query("""
-        SELECT COUNT(*) FROM stored_messages
-        WHERE role = :role
-          AND expiresAt > :now
-          AND status IN (0, 1)
-        """)
+            SELECT COUNT(*) FROM stored_messages
+            WHERE role = :role
+              AND expiresAt > :now
+              AND status IN (0, 1)
+            """)
     int countActive(
             int role,
             long now
