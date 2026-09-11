@@ -2,7 +2,9 @@ name: ساخت APK رابطو
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
+      - phase-a-merge
     tags:
       - 'v*.*.*'
   workflow_dispatch:
